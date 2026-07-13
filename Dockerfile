@@ -1,5 +1,5 @@
 FROM php:8.1-cli
-ARG CACHEBUST=4
+ARG CACHEBUST=5
 
 # System dependencies + mongodb extension + composer
 RUN apt-get update && apt-get install -y \
