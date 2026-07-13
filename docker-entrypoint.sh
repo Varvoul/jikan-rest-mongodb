@@ -3,6 +3,9 @@ set -e
 
 cd /app
 
+# Remove lock file to force fresh dependency resolution
+rm -f composer.lock
+
 # Install PHP dependencies at runtime (RUN-time composer install silently fails on Render free tier)
 if [ ! -d "vendor" ] || [ ! -f "vendor/autoload.php" ]; then
     echo "[entrypoint] vendor/ not found, running composer install..."
