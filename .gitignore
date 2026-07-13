@@ -1,5 +1,4 @@
 /vendor/
-/.env
 storage/logs/*
 !storage/logs/.gitignore
 storage/framework/cache/*
