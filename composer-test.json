@@ -1,8 +1,0 @@
-{
-    "require": {
-        "vlucas/phpdotenv": "^3.3"
-    },
-    "config": {
-        "optimize-autoloader": true
-    }
-}
