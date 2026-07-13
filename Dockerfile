@@ -1,5 +1,5 @@
-FROM php:8.1-cli
-ARG BUILD_VERSION=6
+FROM php:8.0-cli
+ARG BUILD_VERSION=7
 
 # System dependencies + mongodb extension + composer
 RUN apt-get update && apt-get install -y \
