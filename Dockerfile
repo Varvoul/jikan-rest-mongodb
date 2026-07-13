@@ -3,20 +3,22 @@ FROM composer:2.2 as vendor
 WORKDIR /app
 COPY composer.json composer.lock* ./
 
-# Install PHP extensions required for mongodb
+# Install PHP extensions required for mongodb in the composer stage
 RUN apt-get update && apt-get install -y \
     libcurl4-openssl-dev \
     pkg-config \
     libssl-dev \
+    unzip \
+    git \
     && docker-php-ext-install curl \
-    && pecl install mongodb \
+    && pecl install mongodb-1.15.0 \
     && docker-php-ext-enable mongodb
 
 # Install dependencies without dev
-RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist
+RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs
 
 # Application stage
-FROM php:8.1-cli
+FROM php:7.4-cli
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -28,9 +30,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
-RUN docker-php-ext-install curl \
-    && pecl install mongodb \
-    && docker-php-ext-enable mongodb
+RUN apt-get update \
+    && docker-php-ext-install curl \
+    && pecl install mongodb-1.15.0 \
+    && docker-php-ext-enable mongodb \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -42,7 +46,8 @@ COPY . .
 
 # Set permissions
 RUN mkdir -p storage/framework/cache storage/logs storage/app \
-    && chown -R www-data:www-data storage
+    && chown -R www-data:www-data storage \
+    && chmod -R 777 storage
 
 # Expose port
 EXPOSE 10000
