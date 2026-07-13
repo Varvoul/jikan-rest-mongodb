@@ -27,25 +27,13 @@ defined('JIKAN_REST_API_VERSION') or define('JIKAN_REST_API_VERSION', '3.4.3');
 */
 
 
+// PHP 8.0 compatibility: Lumen 5.8's error handler checks error_reporting()
+// Exclude E_DEPRECATED so getClass() deprecation doesn't become ErrorException
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+
 $app = new Laravel\Lumen\Application(
     realpath(__DIR__.'/../')
 );
-
-// Fix PHP 8.0 deprecation: Override Lumen's error handler to skip E_DEPRECATED
-restore_error_handler();
-set_error_handler(function ($errno, $errstr, $errfile, $errline) {
-    if ($errno === E_DEPRECATED || $errno === E_USER_DEPRECATED) {
-        return true; // Suppress deprecation notices (PHP 8.0 + Lumen 5.8 compat)
-    }
-    // Re-register Lumen's original handler for other errors
-    return false;
-});
-set_exception_handler(function ($e) {
-    $handler = app(Illuminate\Contracts\Debug\ExceptionHandler::class);
-    $handler->report($e);
-    $response = $handler->render(request(), $e);
-    $response->send();
-});
 
 $app->withFacades();
 // Don't use Eloquent - we use MongoDB directly
