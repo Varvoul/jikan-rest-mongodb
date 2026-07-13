@@ -22,53 +22,95 @@ if [ $COMPOSER_EXIT -ne 0 ]; then
     echo "[entrypoint] ERROR: composer install failed!"
     echo "COMPOSER_INSTALL_FAILED exit=$COMPOSER_EXIT" > /app/storage/composer_error.txt
     tail -20 /tmp/composer-install.log >> /app/storage/composer_error.txt
+    # Still try to start - will show error
+    mkdir -p storage/framework/cache storage/logs storage/app
+    chmod -R 777 storage 2>/dev/null || true
+    exec php -S 0.0.0.0:10000 -t public
+fi
+
+echo "[entrypoint] Step 2: Check mongodb/mongodb version..."
+INSTALLED_MONGO_VER=$(php -r "
+    \$f = '/app/vendor/composer/installed.json';
+    \$data = json_decode(file_get_contents(\$f), true);
+    foreach (\$data as \$p) {
+        if (isset(\$p['name']) && \$p['name'] === 'mongodb/mongodb') {
+            echo \$p['version'];
+            break;
+        }
+    }
+" 2>&1)
+echo "[entrypoint] Currently installed: mongodb/mongodb $INSTALLED_MONGO_VER"
+
+# Check if the installed version has the PHP 8.0 compatibility issue
+# Test if Client.php can be parsed
+PHP_TEST=$(php -l /app/vendor/mongodb/mongodb/src/Client.php 2>&1)
+if echo "$PHP_TEST" | grep -q "No syntax errors"; then
+    echo "[entrypoint] mongodb/mongodb syntax OK, no replacement needed"
 else
-    echo "[entrypoint] Step 2: replacing mongodb/mongodb with 1.14.4 (PHP 8.0 compatible)..."
-    # Composer may resolve to 1.17+ which uses PHP 8.1+ syntax
-    # Manually download 1.14.4 which is known PHP 8.0 compatible
-    rm -rf /tmp/mongodb-pkg /app/vendor/mongodb
-    mkdir -p /tmp/mongodb-pkg
+    echo "[entrypoint] Syntax error detected, downloading PHP 8.0 compatible version..."
+    echo "[entrypoint] Error was: $PHP_TEST"
     
-    curl -sSL "https://repo.packagist.org/p/mongodb/mongodb%2445211b04ac389ad51bb68634c82178a9e98b40b0f4f74c4447eb7671e70c529e.zip" \
-        -o /tmp/mongodb-pkg/mongodb.zip 2>&1 && \
-    unzip -q /tmp/mongodb-pkg/mongodb.zip -d /tmp/mongodb-pkg 2>&1
+    # Download mongo-php-library 1.14.4 from GitHub
+    rm -rf /tmp/mongodb-replace
+    mkdir -p /tmp/mongodb-replace
     
-    # Try direct packagist download
-    if [ ! -d "/tmp/mongodb-pkg/mongodb" ]; then
-        echo "[entrypoint] Packagist hash download failed, trying github release..."
-        curl -sSL "https://github.com/mongodb/mongo-php-library/archive/refs/tags/1.14.4.tar.gz" \
-            -o /tmp/mongodb-pkg/mongodb.tar.gz 2>&1 && \
-        tar xzf /tmp/mongodb-pkg/mongodb.tar.gz -C /tmp/mongodb-pkg 2>&1 && \
-        mv /tmp/mongodb-pkg/mongo-php-library-1.14.4 /tmp/mongodb-pkg/mongodb 2>&1
-    fi
+    echo "[entrypoint] Downloading mongo-php-library 1.14.4 from GitHub..."
+    curl -sSL --max-time 120 "https://github.com/mongodb/mongo-php-library/archive/refs/tags/1.14.4.tar.gz" \
+        -o /tmp/mongodb-replace/mongodb.tar.gz
     
-    if [ -d "/tmp/mongodb-pkg/mongodb" ]; then
-        # Remove the incompatible version installed by composer
-        rm -rf /app/vendor/mongodb/mongodb
-        cp -r /tmp/mongodb-pkg/mongodb /app/vendor/mongodb/mongodb
-        # Regenerate autoloader for the replaced package
-        composer dump-autoload --no-dev --no-scripts --ignore-platform-reqs 2>&1
-        echo "[entrypoint] mongodb/mongodb manually replaced with 1.14.4"
+    if [ -f /tmp/mongodb-replace/mongodb.tar.gz ] && [ -s /tmp/mongodb-replace/mongodb.tar.gz ]; then
+        echo "[entrypoint] Download complete, extracting..."
+        tar xzf /tmp/mongodb-replace/mongodb.tar.gz -C /tmp/mongodb-replace
+        
+        EXTRACTED_DIR=$(ls -d /tmp/mongodb-replace/mongo-php-library-* 2>/dev/null | head -1)
+        echo "[entrypoint] Extracted to: $EXTRACTED_DIR"
+        
+        if [ -d "$EXTRACTED_DIR" ] && [ -f "$EXTRACTED_DIR/src/Client.php" ]; then
+            echo "[entrypoint] Source has src/Client.php, proceeding with replacement..."
+            echo "[entrypoint] Source structure:"
+            ls -la "$EXTRACTED_DIR/src/" | head -10
+            
+            # Verify replacement is syntax-clean
+            NEW_TEST=$(php -l "$EXTRACTED_DIR/src/Client.php" 2>&1)
+            if echo "$NEW_TEST" | grep -q "No syntax errors"; then
+                echo "[entrypoint] Replacement version syntax OK"
+                rm -rf /app/vendor/mongodb/mongodb
+                cp -r "$EXTRACTED_DIR" /app/vendor/mongodb/mongodb
+                echo "[entrypoint] Files copied, verifying..."
+                ls -la /app/vendor/mongodb/mongodb/src/ | head -10
+                
+                # Regenerate autoloader
+                composer dump-autoload --no-dev --no-scripts --ignore-platform-reqs 2>&1
+                echo "[entrypoint] Autoloader regenerated successfully"
+            else
+                echo "[entrypoint] WARNING: Replacement also has syntax errors, aborting"
+                echo "$NEW_TEST"
+            fi
+        else
+            echo "[entrypoint] WARNING: Downloaded archive missing src/Client.php"
+            ls -la /tmp/mongodb-replace/ 2>&1
+            ls -la "$EXTRACTED_DIR/" 2>&1 | head -10
+        fi
     else
-        echo "[entrypoint] WARNING: Could not download mongodb/mongodb 1.14.4, keeping composer version"
+        echo "[entrypoint] WARNING: Download failed or empty file"
+        ls -la /tmp/mongodb-replace/ 2>&1
     fi
     
-    # Cleanup
-    rm -rf /tmp/mongodb-pkg
-    
-    # Show installed mongodb version
-    php -r "
-        \$f = '/app/vendor/composer/installed.json';
-        if (file_exists(\$f)) {
-            \$data = json_decode(file_get_contents(\$f), true);
-            foreach (\$data as \$p) {
-                if (isset(\$p['name']) && \$p['name'] === 'mongodb/mongodb') {
-                    echo '[entrypoint] mongodb/mongodb installed: ' . (\$p['version'] ?? '?') . PHP_EOL;
-                }
+    rm -rf /tmp/mongodb-replace
+fi
+
+# Show final installed mongodb version
+php -r "
+    \$f = '/app/vendor/composer/installed.json';
+    if (file_exists(\$f)) {
+        \$data = json_decode(file_get_contents(\$f), true);
+        foreach (\$data as \$p) {
+            if (isset(\$p['name']) && \$p['name'] === 'mongodb/mongodb') {
+                echo '[entrypoint] Final mongodb/mongodb: ' . (\$p['version'] ?? '?') . PHP_EOL;
             }
         }
-    " 2>&1 || true
-fi
+    }
+" 2>&1 || true
 
 # Ensure storage directories are writable
 mkdir -p storage/framework/cache storage/logs storage/app
