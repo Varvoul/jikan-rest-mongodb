@@ -1,5 +1,5 @@
 FROM php:8.1-cli
-ARG CACHEBUST=5
+ARG BUILD_VERSION=6
 
 # System dependencies + mongodb extension + composer
 RUN apt-get update && apt-get install -y \
@@ -20,11 +20,11 @@ RUN apt-get update && apt-get install -y \
 
 COPY . /app
 WORKDIR /app
-# Cache bust v2
-RUN true
 
-# Install PHP dependencies
-RUN COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs
+# Force invalidation of composer layer
+RUN echo "Build v${BUILD_VERSION}" > /app/build_version.txt \
+    && COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs \
+    && rm -f /app/build_version.txt
 
 # Set permissions
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
