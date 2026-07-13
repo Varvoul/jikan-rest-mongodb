@@ -23,18 +23,10 @@ WORKDIR /app
 # Install PHP dependencies
 RUN COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs
 
-# Patch Lumen 5.8 Container.php for PHP 8.0 (ReflectionParameter::getClass deprecated)
-RUN php -r '
-    $f = "/app/vendor/illuminate/container/Container.php";
-    $c = file_get_contents($f);
-    $c = str_replace(
-        "if (!is_null($param->getClass())) {\n                            $class = $param->getClass()->getName();",
-        "if ($param->getType() && !$param->getType()->isBuiltin()) {\n                            $class = $param->getType()->getName();",
-        $c
-    );
-    file_put_contents($f, $c);
-    echo "Patched\n";
-' 2>&1 || echo "Patch skipped"
+# Patch Lumen 5.8 for PHP 8.0 compatibility
+# Replace: $param->getClass() with compatible check
+RUN sed -i 's/\$param->getClass()/$param->getType() \&\& !$param->getType()->isBuiltin()/g' \
+    /app/vendor/illuminate/container/Container.php
 
 # Set permissions
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
