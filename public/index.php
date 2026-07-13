@@ -5,11 +5,10 @@
 |--------------------------------------------------------------------------
 */
 
-// Debug: log env vars to public
-$envLog = "MONGODB_URI=" . (getenv('MONGODB_URI') ?: 'NULL') . "\n" .
-    "CACHE_DRIVER=" . (getenv('CACHE_DRIVER') ?: 'NULL') . "\n" .
-    "All env keys: " . implode(', ', array_keys(array_filter($_ENV))) . "\n";
-@file_put_contents(__DIR__.'/env_debug.txt', $envLog);
+// Debug: log env vars
+error_log("MONGODB_URI=" . (getenv('MONGODB_URI') ?: 'NULL'));
+error_log("CACHE_DRIVER=" . (getenv('CACHE_DRIVER') ?: 'NULL'));
+error_log("ENV_COUNT=" . count($_ENV));
 
 $app = require __DIR__.'/../bootstrap/app.php';
 
