@@ -65,4 +65,5 @@ mkdir -p storage/framework/cache storage/logs storage/app
 chmod -R 777 storage 2>/dev/null || true
 
 echo "[entrypoint] Starting PHP built-in server on port 10000..."
-exec php -S 0.0.0.0:10000 -t public
+# Load polyfill.php before any PHP file to provide PHP 8.1+ function shims
+exec php -d auto_prepend_file=/app/polyfill.php -S 0.0.0.0:10000 -t public
