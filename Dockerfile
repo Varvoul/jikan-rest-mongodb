@@ -23,11 +23,6 @@ WORKDIR /app
 # Install PHP dependencies
 RUN COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs
 
-# Patch Lumen 5.8 for PHP 8.0 compatibility
-# Replace: $param->getClass() with compatible check
-RUN sed -i 's/\$param->getClass()/$param->getType() \&\& !$param->getType()->isBuiltin()/g' \
-    /app/vendor/illuminate/container/Container.php
-
 # Set permissions
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
 
