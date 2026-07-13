@@ -46,7 +46,7 @@ if [ $install_success -eq 0 ]; then
         echo "COMPOSER_INSTALL_FAILED" > /app/storage/composer_error.txt
         tail -20 /tmp/composer-install.log >> /app/storage/composer_error.txt
     else
-        echo "[entrypoint] Install succeeded, applying PHP 8.0 compatibility patches..."
+        echo "[entrypoint] Install succeeded, applying patches..."
 
         # Patch mongodb/mongodb if it has PHP 8.1+ syntax
         if [ -d /app/vendor/mongodb/mongodb/src ]; then
@@ -72,6 +72,13 @@ if (!function_exists('array_is_list')) {
 POLYFILL
                 PHP_EXTRA="-d auto_prepend_file=/app/polyfill.php"
             fi
+        fi
+
+        # Patch jikan-me/jikan AnimeParser for new MAL HTML structure
+        # MAL removed the "anime_detail_related_anime" class; now uses "related-entries" div
+        if [ -f /app/patch-related.php ]; then
+            echo "[entrypoint] Patching Jikan AnimeParser::getRelated() for new MAL HTML..."
+            php /app/patch-related.php
         fi
     fi
 fi

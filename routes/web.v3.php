@@ -40,6 +40,10 @@ $router->group(
            'uses' => 'MetaController@status'
         ]);
 
+        $router->get('/clear_cache', [
+           'uses' => 'MetaController@clearCache'
+        ]);
+
         $router->group(
             [
                 'prefix' => 'requests'

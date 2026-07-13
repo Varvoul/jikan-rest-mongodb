@@ -41,6 +41,35 @@ class MetaController extends Controller
         }
     }
 
+    public function clearCache()
+    {
+        try {
+            $uri = env('MONGODB_URI');
+            $database = env('MONGODB_DATABASE', 'jikan');
+            $client = new Client($uri);
+            $db = $client->selectDatabase($database);
+            $collection = $db->selectCollection(env('MONGODB_CACHE_COLLECTION', 'cache'));
+
+            // Delete all cached request data (request:* and ttl:*) but keep meta counters
+            $dataResult = $collection->deleteMany(['key' => ['$regex' => '^' . preg_quote(env('CACHE_PREFIX', 'jikan') . 'request:', '/')]]);
+            $ttlResult = $collection->deleteMany(['key' => ['$regex' => '^' . preg_quote(env('CACHE_PREFIX', 'jikan') . 'ttl:', '/')]]);
+            $notFoundResult = $collection->deleteMany(['key' => ['$regex' => '^' . preg_quote(env('CACHE_PREFIX', 'jikan') . 'request:404:', '/')]]);
+
+            return response()->json([
+                'status' => 'ok',
+                'deleted_data_entries' => $dataResult->getDeletedCount(),
+                'deleted_ttl_entries' => $ttlResult->getDeletedCount(),
+                'deleted_404_entries' => $notFoundResult->getDeletedCount(),
+                'message' => 'All request cache cleared. Next requests will re-fetch from MAL.',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function requests($type, $period, $offset = 0)
     {
         if (!\in_array($type, [
