@@ -2,10 +2,10 @@
 
 cd /app
 
-# Always do a fresh install
+# Remove old artifacts
 rm -rf vendor composer.lock
 
-echo "[entrypoint] Running composer install..."
+echo "[entrypoint] Step 1: composer install (resolves all dependencies)..."
 COMPOSER_MEMORY_LIMIT=-1 composer install \
     --no-dev \
     --no-interaction \
@@ -16,27 +16,42 @@ COMPOSER_MEMORY_LIMIT=-1 composer install \
     2>&1 | tee /tmp/composer-install.log
 
 COMPOSER_EXIT=${PIPESTATUS[0]}
-echo "[entrypoint] composer exit code: $COMPOSER_EXIT"
+echo "[entrypoint] composer install exit code: $COMPOSER_EXIT"
 
 if [ $COMPOSER_EXIT -ne 0 ]; then
     echo "[entrypoint] ERROR: composer install failed!"
-    echo "[entrypoint] Last 50 lines of log:"
-    tail -50 /tmp/composer-install.log
-    # Write error to a file so the PHP server can show it
     echo "COMPOSER_INSTALL_FAILED exit=$COMPOSER_EXIT" > /app/storage/composer_error.txt
+    tail -20 /tmp/composer-install.log >> /app/storage/composer_error.txt
 else
-    echo "[entrypoint] composer install succeeded"
+    echo "[entrypoint] Step 2: downgrading mongodb/mongodb to ~1.14.0 (PHP 8.0 compatible)..."
+    COMPOSER_MEMORY_LIMIT=-1 composer require mongodb/mongodb:'~1.14.0' \
+        --no-interaction \
+        --no-scripts \
+        --ignore-platform-reqs \
+        --no-cache \
+        --with-all-dependencies \
+        2>&1 | tee /tmp/composer-downgrade.log
+    
+    DOWNGRADE_EXIT=${PIPESTATUS[0]}
+    echo "[entrypoint] downgrade exit code: $DOWNGRADE_EXIT"
+    
+    if [ $DOWNGRADE_EXIT -ne 0 ]; then
+        echo "[entrypoint] WARNING: mongodb downgrade failed, continuing with installed version"
+        tail -10 /tmp/composer-downgrade.log
+    fi
+    
     # Show installed mongodb version
-    if [ -f vendor/composer/installed.json ]; then
-        php -r "
-            \$data = json_decode(file_get_contents('/app/vendor/composer/installed.json'), true);
-            foreach (\$data as \$pkg) {
-                if (isset(\$pkg['name']) && \$pkg['name'] === 'mongodb/mongodb') {
-                    echo '[entrypoint] mongodb/mongodb version: ' . \$pkg['version'] . PHP_EOL;
+    php -r "
+        \$f = '/app/vendor/composer/installed.json';
+        if (file_exists(\$f)) {
+            \$data = json_decode(file_get_contents(\$f), true);
+            foreach (\$data as \$p) {
+                if (isset(\$p['name']) && \$p['name'] === 'mongodb/mongodb') {
+                    echo '[entrypoint] mongodb/mongodb installed: ' . (\$p['version'] ?? '?') . PHP_EOL;
                 }
             }
-        " 2>&1 || true
-    fi
+        }
+    " 2>&1 || true
 fi
 
 # Ensure storage directories are writable
