@@ -96,7 +96,6 @@ $app->configure('cache');
 
 // Do NOT register Redis service provider
 // $app->register(Illuminate\Redis\RedisServiceProvider::class);
-$app->register(Flipbox\LumenGenerator\LumenGeneratorServiceProvider::class);
 
 // Register MongoDB Cache Store
 $app->singleton('cache', function ($app) {
