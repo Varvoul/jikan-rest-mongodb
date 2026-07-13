@@ -46,22 +46,29 @@ if [ $install_success -eq 0 ]; then
         echo "COMPOSER_INSTALL_FAILED" > /app/storage/composer_error.txt
         tail -20 /tmp/composer-install.log >> /app/storage/composer_error.txt
     else
-        echo "[entrypoint] Install succeeded, applying patches..."
+        install_success=1
+        echo "[entrypoint] Install succeeded"
+    fi
+fi
 
-        # Patch mongodb/mongodb if it has PHP 8.1+ syntax
-        if [ -d /app/vendor/mongodb/mongodb/src ]; then
-            # Check for 'readonly' keyword (PHP 8.1+)
-            READONLY_COUNT=$(grep -rl 'readonly' /app/vendor/mongodb/mongodb/src/ --include="*.php" 2>/dev/null | wc -l)
-            if [ "$READONLY_COUNT" -gt 0 ]; then
-                echo "[entrypoint] Removing 'readonly' keyword from $READONLY_COUNT files..."
-                find /app/vendor/mongodb/mongodb/src -name "*.php" -exec sed -i 's/\breadonly //g' {} +
-            fi
+# === Apply runtime patches (runs regardless of install path) ===
+if [ $install_success -eq 1 ] && [ -f "vendor/autoload.php" ]; then
+    echo "[entrypoint] Applying runtime patches..."
 
-            # Check for array_is_list usage (PHP 8.1+)
-            ARRAY_IS_LIST=$(grep -rl 'array_is_list' /app/vendor/mongodb/mongodb/src/ --include="*.php" 2>/dev/null | wc -l)
-            if [ "$ARRAY_IS_LIST" -gt 0 ]; then
-                echo "[entrypoint] Creating array_is_list polyfill..."
-                cat > /app/polyfill.php << 'POLYFILL'
+    # Patch mongodb/mongodb if it has PHP 8.1+ syntax
+    if [ -d /app/vendor/mongodb/mongodb/src ]; then
+        # Check for 'readonly' keyword (PHP 8.1+)
+        READONLY_COUNT=$(grep -rl 'readonly' /app/vendor/mongodb/mongodb/src/ --include="*.php" 2>/dev/null | wc -l)
+        if [ "$READONLY_COUNT" -gt 0 ]; then
+            echo "[entrypoint] Removing 'readonly' keyword from $READONLY_COUNT files..."
+            find /app/vendor/mongodb/mongodb/src -name "*.php" -exec sed -i 's/\breadonly //g' {} +
+        fi
+
+        # Check for array_is_list usage (PHP 8.1+)
+        ARRAY_IS_LIST=$(grep -rl 'array_is_list' /app/vendor/mongodb/mongodb/src/ --include="*.php" 2>/dev/null | wc -l)
+        if [ "$ARRAY_IS_LIST" -gt 0 ]; then
+            echo "[entrypoint] Creating array_is_list polyfill..."
+            cat > /app/polyfill.php << 'POLYFILL'
 <?php
 if (!function_exists('array_is_list')) {
     function array_is_list(array $arr): bool {
@@ -70,17 +77,24 @@ if (!function_exists('array_is_list')) {
     }
 }
 POLYFILL
-                PHP_EXTRA="-d auto_prepend_file=/app/polyfill.php"
-            fi
-        fi
-
-        # Patch jikan-me/jikan AnimeParser for new MAL HTML structure
-        # MAL removed the "anime_detail_related_anime" class; now uses "related-entries" div
-        if [ -f /app/patch-related.php ]; then
-            echo "[entrypoint] Patching Jikan AnimeParser::getRelated() for new MAL HTML..."
-            php /app/patch-related.php
+            PHP_EXTRA="-d auto_prepend_file=/app/polyfill.php"
         fi
     fi
+
+    # Patch jikan-me/jikan AnimeParser for new MAL HTML structure
+    # MAL removed the "anime_detail_related_anime" class; now uses "related-entries" div
+    if [ -f /app/patch-related.php ]; then
+        echo "[entrypoint] Patching Jikan AnimeParser::getRelated() for new MAL HTML..."
+        php /app/patch-related.php 2>&1
+        PATCH_EXIT=$?
+        if [ $PATCH_EXIT -ne 0 ]; then
+            echo "[entrypoint] WARNING: patch-related.php exited with code $PATCH_EXIT"
+        fi
+    else
+        echo "[entrypoint] WARNING: patch-related.php not found, skipping parser patch"
+    fi
+else
+    echo "[entrypoint] WARNING: vendor/autoload.php not found, skipping patches"
 fi
 
 # Show installed mongodb version
