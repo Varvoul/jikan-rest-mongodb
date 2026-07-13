@@ -104,10 +104,13 @@ $app->singleton('cache', function ($app) {
 
 // Extend cache with MongoDB driver
 $app->make('cache')->extend('mongodb', function ($app, $config) {
-    $uri = $config['uri'] ?? env('MONGODB_URI');
-    $database = $config['database'] ?? env('MONGODB_DATABASE', 'jikan');
-    $collection = $config['collection'] ?? env('MONGODB_CACHE_COLLECTION', 'cache');
-    $prefix = $config['prefix'] ?? env('CACHE_PREFIX', 'jikan');
+    $uri = getenv('MONGODB_URI');
+    if (empty($uri)) {
+        $uri = $config['uri'] ?? null;
+    }
+    $database = getenv('MONGODB_DATABASE') ?: ($config['database'] ?? 'jikan');
+    $collection = getenv('MONGODB_CACHE_COLLECTION') ?: ($config['collection'] ?? 'cache');
+    $prefix = getenv('CACHE_PREFIX') ?: ($config['prefix'] ?? 'jikan');
 
     $store = new \App\Cache\MongoDbStore($uri, $database, $collection, [], $prefix);
 
