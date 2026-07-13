@@ -7,6 +7,44 @@ use MongoDB\Client;
 
 class MetaController extends Controller
 {
+    public function debug()
+    {
+        $info = [];
+        // Check if patch file exists
+        $info['patch_file_exists'] = file_exists('/app/patch-related.php');
+        // Check jikan version
+        $installed = '/app/vendor/composer/installed.json';
+        if (file_exists($installed)) {
+            $data = json_decode(file_get_contents($installed), true);
+            foreach ($data as $p) {
+                if (isset($p['name']) && $p['name'] === 'jikan-me/jikan') {
+                    $info['jikan_version'] = $p['version'] ?? '?';
+                    break;
+                }
+            }
+        }
+        // Check if AnimeParser was patched
+        $parserFile = '/app/vendor/jikan-me/jikan/src/Parser/Anime/AnimeParser.php';
+        if (file_exists($parserFile)) {
+            $content = file_get_contents($parserFile);
+            $info['parser_file_exists'] = true;
+            $info['has_old_parser'] = strpos($content, 'anime_detail_related_anime') !== false;
+            $info['has_new_tile_parser'] = strpos($content, 'entries-tile') !== false;
+            $info['has_new_table_parser'] = strpos($content, 'entries-table') !== false;
+            $info['has_strategy_comment'] = strpos($content, 'STRATEGY 1') !== false;
+            // Show first 200 chars of getRelated
+            $pos = strpos($content, 'public function getRelated()');
+            if ($pos !== false) {
+                $info['getRelated_preview'] = substr($content, $pos, 200);
+            } else {
+                $info['getRelated_preview'] = 'METHOD NOT FOUND';
+            }
+        } else {
+            $info['parser_file_exists'] = false;
+        }
+        return response()->json($info);
+    }
+
     public function status()
     {
         try {
