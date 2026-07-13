@@ -5,13 +5,11 @@
 |--------------------------------------------------------------------------
 */
 
-// Debug: log env vars availability
-file_put_contents(__DIR__.'/../storage/logs/env_debug.log', 
-    "MONGODB_URI=" . (getenv('MONGODB_URI') ?: 'NULL') . "\n" .
+// Debug: log env vars to public
+$envLog = "MONGODB_URI=" . (getenv('MONGODB_URI') ?: 'NULL') . "\n" .
     "CACHE_DRIVER=" . (getenv('CACHE_DRIVER') ?: 'NULL') . "\n" .
-    "SERVER_NAME=" . ($_SERVER['SERVER_NAME'] ?? 'NULL') . "\n" .
-    "HTTP_HOST=" . ($_SERVER['HTTP_HOST'] ?? 'NULL') . "\n"
-);
+    "All env keys: " . implode(', ', array_keys(array_filter($_ENV))) . "\n";
+@file_put_contents(__DIR__.'/env_debug.txt', $envLog);
 
 $app = require __DIR__.'/../bootstrap/app.php';
 
