@@ -3,23 +3,30 @@ set -e
 
 cd /app
 
-# Remove lock file to force fresh dependency resolution
-rm -f composer.lock
+# ALWAYS do a fresh install to avoid cached incompatible versions
+rm -rf vendor composer.lock
 
-# Install PHP dependencies at runtime (RUN-time composer install silently fails on Render free tier)
-if [ ! -d "vendor" ] || [ ! -f "vendor/autoload.php" ]; then
-    echo "[entrypoint] vendor/ not found, running composer install..."
-    COMPOSER_MEMORY_LIMIT=-1 composer install \
-        --no-dev \
-        --no-interaction \
-        --no-scripts \
-        --prefer-dist \
-        --ignore-platform-reqs \
-        2>&1 | tee /tmp/composer-install.log
-    echo "[entrypoint] composer install completed"
-else
-    echo "[entrypoint] vendor/ exists, skipping composer install"
-fi
+echo "[entrypoint] Running composer install..."
+COMPOSER_MEMORY_LIMIT=-1 composer install \
+    --no-dev \
+    --no-interaction \
+    --no-scripts \
+    --prefer-dist \
+    --ignore-platform-reqs \
+    2>&1 | tee /tmp/composer-install.log
+
+# Show installed mongodb version
+echo "[entrypoint] Installed mongodb/mongodb version:"
+php -r "
+\$data = json_decode(file_get_contents('/app/vendor/composer/installed.json'), true);
+foreach (\$data as \$pkg) {
+    if (isset(\$pkg['name']) && \$pkg['name'] === 'mongodb/mongodb') {
+        echo \$pkg['version'] . PHP_EOL;
+    }
+}
+" 2>&1 || true
+
+echo "[entrypoint] composer install completed"
 
 # Ensure storage directories are writable
 mkdir -p storage/framework/cache storage/logs storage/app
