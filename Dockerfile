@@ -19,6 +19,8 @@ RUN apt-get update && apt-get install -y \
 
 COPY . /app
 WORKDIR /app
+# Cache bust v2
+RUN true
 
 # Install PHP dependencies
 RUN COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs
