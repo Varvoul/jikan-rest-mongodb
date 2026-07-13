@@ -44,10 +44,6 @@ $router->group(
            'uses' => 'MetaController@clearCache'
         ]);
 
-        $router->get('/debug', [
-           'uses' => 'MetaController@debug'
-        ]);
-
         $router->group(
             [
                 'prefix' => 'requests'

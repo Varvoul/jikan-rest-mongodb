@@ -7,55 +7,6 @@ use MongoDB\Client;
 
 class MetaController extends Controller
 {
-    public function debug()
-    {
-        $info = [];
-        $info['patch_file_exists'] = file_exists('/app/patch-related.php');
-        // Check ALL installed packages for jikan
-        $installed = '/app/vendor/composer/installed.json';
-        if (file_exists($installed)) {
-            $raw = file_get_contents($installed);
-            $data = json_decode($raw, true);
-            foreach ($data as $p) {
-                $name = $p['name'] ?? '';
-                if (strpos($name, 'jikan') !== false || strpos($name, 'mongodb') !== false) {
-                    $info['packages'][$name] = $p['version'] ?? '?';
-                }
-            }
-        }
-        // Check if AnimeParser was patched
-        $parserFile = '/app/vendor/jikan-me/jikan/src/Parser/Anime/AnimeParser.php';
-        if (file_exists($parserFile)) {
-            $content = file_get_contents($parserFile);
-            $info['parser_file_exists'] = true;
-            $info['parser_file_size'] = strlen($content);
-            $info['has_old_parser'] = strpos($content, 'anime_detail_related_anime') !== false;
-            $info['has_new_tile_parser'] = strpos($content, 'entries-tile') !== false;
-            // Show full getRelated method
-            $pos = strpos($content, 'function getRelated');
-            if ($pos !== false) {
-                $info['getRelated_start'] = substr($content, $pos, 600);
-            }
-        } else {
-            $info['parser_file_exists'] = false;
-        }
-        // Check entrypoint log for patch-related
-        $logFile = '/tmp/patch-related.log';
-        if (file_exists($logFile)) {
-            $info['patch_log'] = file_get_contents($logFile);
-        } else {
-            $info['patch_log'] = 'FILE NOT FOUND - patch may not have been attempted';
-        }
-        // Also show what's around getRelated in the source
-        $pos = strpos($content, 'function getRelated');
-        if ($pos !== false) {
-            // Show 20 chars before to see if 'public' is there
-            $info['getRelated_context_before'] = substr($content, max(0, $pos-30), 30);
-            $info['getRelated_start'] = substr($content, $pos, 600);
-        }
-        return response()->json($info);
-    }
-
     public function status()
     {
         try {
