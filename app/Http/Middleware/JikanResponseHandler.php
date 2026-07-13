@@ -19,7 +19,6 @@ use Illuminate\Support\Facades\Cache;
 class JikanResponseHandler
 {
     private $requestUriHash;
-    private $requestUriHash;
     private $requestType;
     private $requestCacheExpiry = 0;
     private $requestCached = false;
