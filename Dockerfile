@@ -1,14 +1,14 @@
-FROM php:8.0-cli
-ARG CACHEBUST=3
+FROM php:8.1-cli
+ARG CACHEBUST=4
 
 # System dependencies + mongodb extension + composer
 RUN apt-get update && apt-get install -y \
     unzip curl git libcurl4-openssl-dev pkg-config libssl-dev ca-certificates \
     && update-ca-certificates \
     && docker-php-ext-install curl \
-    && curl -L -o /tmp/mongodb.tgz https://pecl.php.net/get/mongodb-1.15.3.tgz \
+    && curl -L -o /tmp/mongodb.tgz https://pecl.php.net/get/mongodb-1.15.4.tgz \
     && tar -xzf /tmp/mongodb.tgz -C /tmp \
-    && cd /tmp/mongodb-1.15.3 \
+    && cd /tmp/mongodb-1.15.4 \
     && phpize \
     && ./configure --with-php-config=/usr/local/bin/php-config \
     && make -j$(nproc) \
