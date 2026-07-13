@@ -6,29 +6,25 @@
  * New structure uses div.related-entries with:
  *   - div.entries-tile > div.entry (tile cards with div.relation + div.title > a)
  *   - table.entries-table > tr (table rows with td.ar + td > ul.entries > li > a)
- *
- * This script patches the getRelated() method in the installed vendor file.
  */
 
 $parserFile = '/app/vendor/jikan-me/jikan/src/Parser/Anime/AnimeParser.php';
 
 if (!file_exists($parserFile)) {
-    echo "[patch-related] AnimeParser.php not found at $parserFile\n";
+    echo "[patch-related] AnimeParser.php not found\n";
     exit(1);
 }
 
 $content = file_get_contents($parserFile);
+$originalLength = strlen($content);
 
-// The new getRelated() method - handles new MAL HTML + fallback to old
+// The new getRelated() method
 $newMethod = <<<'METHOD'
     public function getRelated(): array
     {
         $related = [];
 
         // === STRATEGY 1: NEW MAL tile format ===
-        // div.related-entries > div.entries-tile > div.entry
-        //   div.content > div.relation  -> "Sequel (TV)"
-        //   div.content > div.title > a -> link
         $this->crawler
             ->filter('div.related-entries div.entries-tile div.entry')
             ->each(
@@ -38,9 +34,7 @@ $newMethod = <<<'METHOD'
                         return;
                     }
 
-                    // Get raw text like "Sequel\n                  (TV)" and clean it
                     $rawRelation = $relationNode->text();
-                    // Remove parenthetical type hints like "(TV)", "(Manga)", "(Special)"
                     $relation = preg_replace('/\s*\([^)]+\)\s*/', '', $rawRelation);
                     $relation = str_replace(':', '', $relation);
                     $relation = JString::cleanse($relation);
@@ -67,9 +61,6 @@ $newMethod = <<<'METHOD'
         }
 
         // === STRATEGY 2: NEW MAL table format ===
-        // table.entries-table > tr
-        //   td.ar > "Side Story:"
-        //   td > ul.entries > li > a > links
         $this->crawler
             ->filter('div.related-entries table.entries-table tr')
             ->each(
@@ -151,65 +142,32 @@ $newMethod = <<<'METHOD'
     }
 METHOD;
 
-// Find the getRelated() method using brace counting
-$methodStart = strpos($content, 'public function getRelated()');
-if ($methodStart === false) {
-    $methodStart = strpos($content, 'public function getRelated ()');
-}
-if ($methodStart === false) {
-    echo "[patch-related] Could not locate getRelated method\n";
-    exit(1);
-}
+// Use regex with 's' flag (DOTALL) to match the entire method
+// Match: from "public function getRelated(): array" up to "return $related;\n    }"
+$pattern = '/public\s+function\s+getRelated\s*\(\s*\)\s*:\s*array\s*\{.*?return\s+\$related\s*;\s*\}/s';
 
-// Find the opening brace
-$braceStart = strpos($content, '{', $methodStart);
-if ($braceStart === false) {
-    echo "[patch-related] Could not find opening brace\n";
-    exit(1);
-}
-
-// Count braces to find the matching closing brace, skipping strings
-$depth = 0;
-$pos = $braceStart;
-$methodEnd = false;
-$len = strlen($content);
-while ($pos < $len) {
-    $ch = $content[$pos];
-    if ($ch === '{') {
-        $depth++;
-    } elseif ($ch === '}') {
-        $depth--;
-        if ($depth === 0) {
-            $methodEnd = $pos + 1;
-            break;
-        }
-    } elseif ($ch === "'" || $ch === '"') {
-        // Skip string contents to avoid counting braces inside strings
-        $quote = $ch;
-        $pos++;
-        while ($pos < $len && $content[$pos] !== $quote) {
-            if ($content[$pos] === '\\') {
-                $pos++; // skip escaped character
-            }
-            $pos++;
+if (!preg_match($pattern, $content)) {
+    echo "[patch-related] ERROR: regex did not match getRelated() method\n";
+    // Debug: show what's around the method
+    $pos = strpos($content, 'function getRelated');
+    if ($pos !== false) {
+        echo "[patch-related] Found 'function getRelated' at pos $pos\n";
+        echo "[patch-related] Context: " . json_encode(substr($content, $pos, 80)) . "\n";
+        // Check for \r\n
+        if (strpos($content, "\r\n") !== false) {
+            echo "[patch-related] NOTE: file uses CRLF line endings\n";
         }
     }
-    $pos++;
-}
-
-if ($methodEnd === false) {
-    echo "[patch-related] Could not find matching closing brace\n";
     exit(1);
 }
 
-// Replace the method
-$newContent = substr($content, 0, $methodStart) . $newMethod . substr($content, $methodEnd);
+$newContent = preg_replace($pattern, $newMethod, $content, 1);
 
-if ($newContent === $content) {
-    echo "[patch-related] No changes made (content identical)\n";
+if ($newContent === null || $newContent === $content) {
+    echo "[patch-related] ERROR: preg_replace failed or no change\n";
     exit(1);
 }
 
 file_put_contents($parserFile, $newContent);
-echo "[patch-related] Successfully patched AnimeParser::getRelated() for new MAL HTML structure\n";
+echo "[patch-related] Successfully patched AnimeParser::getRelated() (replaced " . strlen($content) . " -> " . strlen($newContent) . " bytes)\n";
 exit(0);
