@@ -10,23 +10,24 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions
+# Install PHP curl extension
 RUN docker-php-ext-install curl
 
-# Install mongodb extension
-RUN pecl install mongodb-1.15.3 \
+# Install mongodb extension (use latest compatible with PHP 7.4)
+RUN pecl install mongodb \
     && docker-php-ext-enable mongodb
 
 # Install composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+COPY --from=composer:2.2 /usr/bin/composer /usr/local/bin/composer
 
 WORKDIR /app
 
-# Copy composer files first for layer caching
+# Copy composer files first for Docker layer caching
 COPY composer.json ./
 
-# Install PHP dependencies (ignore platform reqs since we know our setup)
-RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs 2>&1
+# Install PHP dependencies
+RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs 2>&1 || \
+    (echo "RETRYING composer install..." && rm -rf vendor composer.lock && composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs 2>&1)
 
 # Copy application files
 COPY . .
@@ -35,7 +36,7 @@ COPY . .
 RUN mkdir -p storage/framework/cache storage/logs storage/app \
     && chmod -R 777 storage
 
-# Expose port (Render provides PORT env var)
+# Expose port
 EXPOSE 10000
 
 # Use PHP built-in server
