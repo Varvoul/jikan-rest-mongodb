@@ -1,5 +1,5 @@
 FROM php:8.0-cli
-ARG BUILD_VERSION=7
+ARG BUILD_VERSION=8
 
 # System dependencies + mongodb extension + composer
 RUN apt-get update && apt-get install -y \
@@ -21,10 +21,9 @@ RUN apt-get update && apt-get install -y \
 COPY . /app
 WORKDIR /app
 
-# Force invalidation of composer layer
-RUN echo "Build v${BUILD_VERSION}" > /app/build_version.txt \
-    && COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs \
-    && rm -f /app/build_version.txt
+# Remove any stale vendor from image cache, then install fresh
+RUN rm -rf vendor
+RUN COMPOSER_MEMORY_LIMIT=-1 composer install --no-dev --no-interaction --no-scripts --prefer-dist --ignore-platform-reqs
 
 # Set permissions
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
