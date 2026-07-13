@@ -1,4 +1,5 @@
 FROM php:8.0-cli
+ARG CACHEBUST=3
 
 # System dependencies + mongodb extension + composer
 RUN apt-get update && apt-get install -y \
