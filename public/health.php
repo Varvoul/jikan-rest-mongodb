@@ -1,5 +1,5 @@
 <?php
-// Quick diagnostic endpoint - remove after debugging
+// Diagnostic endpoint
 if (isset($_GET['_health'])) {
     header('Content-Type: application/json');
     $info = [
@@ -12,8 +12,15 @@ if (isset($_GET['_health'])) {
             : 'none',
     ];
     
-    if (file_exists('/tmp/composer-install.log')) {
-        $info['composer_log_tail'] = implode("\n", array_slice(explode("\n", file_get_contents('/tmp/composer-install.log')), -20));
+    // Show installed mongodb library version
+    $installedFile = __DIR__ . '/../vendor/composer/installed.json';
+    if (file_exists($installedFile)) {
+        $data = json_decode(file_get_contents($installedFile), true);
+        foreach ($data as $pkg) {
+            if (isset($pkg['name']) && $pkg['name'] === 'mongodb/mongodb') {
+                $info['mongodb_lib_version'] = $pkg['version'] ?? 'unknown';
+            }
+        }
     }
     
     echo json_encode($info, JSON_PRETTY_PRINT);
