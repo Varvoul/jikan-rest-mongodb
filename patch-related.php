@@ -18,7 +18,6 @@ if (!file_exists($parserFile)) {
 $content = file_get_contents($parserFile);
 $originalLength = strlen($content);
 
-// The new getRelated() method
 $newMethod = <<<'METHOD'
     public function getRelated(): array
     {
@@ -56,9 +55,8 @@ $newMethod = <<<'METHOD'
                 }
             );
 
-        if (!empty($related)) {
-            return $related;
-        }
+        // Don't return early — tile format may only have 2 entries,
+        // the table format below has the rest. Merge both.
 
         // === STRATEGY 2: NEW MAL table format ===
         $this->crawler
@@ -89,7 +87,9 @@ $newMethod = <<<'METHOD'
                     if ($links->count() == 1
                         && empty($links->first()->text())
                     ) {
-                        $related[$relation] = [];
+                        if (!isset($related[$relation])) {
+                            $related[$relation] = [];
+                        }
                         return;
                     }
 
@@ -99,15 +99,16 @@ $newMethod = <<<'METHOD'
                         }
                     }
 
-                    $related[$relation] = $links->each(function (Crawler $c) {
+                    $items = $links->each(function (Crawler $c) {
                         return (new MalUrlParser($c))->getModel();
                     });
+                    if (isset($related[$relation])) {
+                        $related[$relation] = array_merge($related[$relation], $items);
+                    } else {
+                        $related[$relation] = $items;
+                    }
                 }
             );
-
-        if (!empty($related)) {
-            return $related;
-        }
 
         // === STRATEGY 3: OLD MAL format (fallback) ===
         $this->crawler
@@ -122,7 +123,9 @@ $newMethod = <<<'METHOD'
                     if ($links->count() == 1
                         && empty($links->first()->text())
                     ) {
-                        $related[$relation] = [];
+                        if (!isset($related[$relation])) {
+                            $related[$relation] = [];
+                        }
                         return;
                     }
 
@@ -132,9 +135,14 @@ $newMethod = <<<'METHOD'
                         }
                     }
 
-                    $related[$relation] = $links->each(function (Crawler $c) {
+                    $items = $links->each(function (Crawler $c) {
                         return (new MalUrlParser($c))->getModel();
                     });
+                    if (isset($related[$relation])) {
+                        $related[$relation] = array_merge($related[$relation], $items);
+                    } else {
+                        $related[$relation] = $items;
+                    }
                 }
             );
 
@@ -142,21 +150,13 @@ $newMethod = <<<'METHOD'
     }
 METHOD;
 
-// Use regex with 's' flag (DOTALL) to match the entire method
-// Match: from "public function getRelated(): array" up to "return $related;\n    }"
 $pattern = '/public\s+function\s+getRelated\s*\(\s*\)\s*:\s*array\s*\{.*?return\s+\$related\s*;\s*\}/s';
 
 if (!preg_match($pattern, $content)) {
     echo "[patch-related] ERROR: regex did not match getRelated() method\n";
-    // Debug: show what's around the method
     $pos = strpos($content, 'function getRelated');
     if ($pos !== false) {
-        echo "[patch-related] Found 'function getRelated' at pos $pos\n";
-        echo "[patch-related] Context: " . json_encode(substr($content, $pos, 80)) . "\n";
-        // Check for \r\n
-        if (strpos($content, "\r\n") !== false) {
-            echo "[patch-related] NOTE: file uses CRLF line endings\n";
-        }
+        echo "[patch-related] Found at pos $pos: " . json_encode(substr($content, $pos, 80)) . "\n";
     }
     exit(1);
 }
@@ -164,10 +164,10 @@ if (!preg_match($pattern, $content)) {
 $newContent = preg_replace($pattern, $newMethod, $content, 1);
 
 if ($newContent === null || $newContent === $content) {
-    echo "[patch-related] ERROR: preg_replace failed or no change\n";
+    echo "[patch-related] ERROR: preg_replace failed\n";
     exit(1);
 }
 
 file_put_contents($parserFile, $newContent);
-echo "[patch-related] Successfully patched AnimeParser::getRelated() (replaced " . strlen($content) . " -> " . strlen($newContent) . " bytes)\n";
+echo "[patch-related] Successfully patched (" . strlen($content) . " -> " . strlen($newContent) . " bytes)\n";
 exit(0);
