@@ -2,14 +2,14 @@
 
 namespace App\Cache;
 
-use Illuminate\Cache\StoreInterface;
+use Illuminate\Contracts\Cache\Store;
 use Illuminate\Contracts\Cache\LockProvider;
 use MongoDB\Client;
 use MongoDB\Collection;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\BSON\ObjectId;
 
-class MongoDbStore implements StoreInterface
+class MongoDbStore implements Store
 {
     /**
      * @var Collection
