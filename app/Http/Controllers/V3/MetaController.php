@@ -10,16 +10,16 @@ class MetaController extends Controller
     public function debug()
     {
         $info = [];
-        // Check if patch file exists
         $info['patch_file_exists'] = file_exists('/app/patch-related.php');
-        // Check jikan version
+        // Check ALL installed packages for jikan
         $installed = '/app/vendor/composer/installed.json';
         if (file_exists($installed)) {
-            $data = json_decode(file_get_contents($installed), true);
+            $raw = file_get_contents($installed);
+            $data = json_decode($raw, true);
             foreach ($data as $p) {
-                if (isset($p['name']) && $p['name'] === 'jikan-me/jikan') {
-                    $info['jikan_version'] = $p['version'] ?? '?';
-                    break;
+                $name = $p['name'] ?? '';
+                if (strpos($name, 'jikan') !== false || strpos($name, 'mongodb') !== false) {
+                    $info['packages'][$name] = $p['version'] ?? '?';
                 }
             }
         }
@@ -28,19 +28,22 @@ class MetaController extends Controller
         if (file_exists($parserFile)) {
             $content = file_get_contents($parserFile);
             $info['parser_file_exists'] = true;
+            $info['parser_file_size'] = strlen($content);
             $info['has_old_parser'] = strpos($content, 'anime_detail_related_anime') !== false;
             $info['has_new_tile_parser'] = strpos($content, 'entries-tile') !== false;
-            $info['has_new_table_parser'] = strpos($content, 'entries-table') !== false;
-            $info['has_strategy_comment'] = strpos($content, 'STRATEGY 1') !== false;
-            // Show first 200 chars of getRelated
-            $pos = strpos($content, 'public function getRelated()');
+            // Show full getRelated method
+            $pos = strpos($content, 'function getRelated');
             if ($pos !== false) {
-                $info['getRelated_preview'] = substr($content, $pos, 200);
-            } else {
-                $info['getRelated_preview'] = 'METHOD NOT FOUND';
+                $info['getRelated_start'] = substr($content, $pos, 600);
             }
         } else {
             $info['parser_file_exists'] = false;
+        }
+        // Check entrypoint log for patch-related
+        $info['entrypoint_lines'] = [];
+        $logFile = '/tmp/composer-install.log';
+        if (file_exists($logFile)) {
+            $info['composer_log_tail'] = substr(file_get_contents($logFile), -500);
         }
         return response()->json($info);
     }
