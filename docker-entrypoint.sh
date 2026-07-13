@@ -85,8 +85,8 @@ POLYFILL
     # MAL removed the "anime_detail_related_anime" class; now uses "related-entries" div
     if [ -f /app/patch-related.php ]; then
         echo "[entrypoint] Patching Jikan AnimeParser::getRelated() for new MAL HTML..."
-        php /app/patch-related.php 2>&1
-        PATCH_EXIT=$?
+        php /app/patch-related.php 2>&1 | tee /tmp/patch-related.log
+        PATCH_EXIT=${PIPESTATUS[0]}
         if [ $PATCH_EXIT -ne 0 ]; then
             echo "[entrypoint] WARNING: patch-related.php exited with code $PATCH_EXIT"
         fi

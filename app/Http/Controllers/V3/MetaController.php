@@ -40,10 +40,18 @@ class MetaController extends Controller
             $info['parser_file_exists'] = false;
         }
         // Check entrypoint log for patch-related
-        $info['entrypoint_lines'] = [];
-        $logFile = '/tmp/composer-install.log';
+        $logFile = '/tmp/patch-related.log';
         if (file_exists($logFile)) {
-            $info['composer_log_tail'] = substr(file_get_contents($logFile), -500);
+            $info['patch_log'] = file_get_contents($logFile);
+        } else {
+            $info['patch_log'] = 'FILE NOT FOUND - patch may not have been attempted';
+        }
+        // Also show what's around getRelated in the source
+        $pos = strpos($content, 'function getRelated');
+        if ($pos !== false) {
+            // Show 20 chars before to see if 'public' is there
+            $info['getRelated_context_before'] = substr($content, max(0, $pos-30), 30);
+            $info['getRelated_start'] = substr($content, $pos, 600);
         }
         return response()->json($info);
     }
