@@ -218,7 +218,6 @@ class MongoDbStore implements Store
 
     /**
      * Check if an item exists in the cache.
-     * Required by StoreInterface in some Laravel versions.
      *
      * @param  string  $key
      * @return bool
@@ -237,5 +236,35 @@ class MongoDbStore implements Store
         );
 
         return $count > 0;
+    }
+
+    /**
+     * Retrieve multiple items from the cache by key.
+     *
+     * @param  array  $keys
+     * @return array
+     */
+    public function many(array $keys)
+    {
+        $results = [];
+        foreach ($keys as $key) {
+            $results[$key] = $this->get($key);
+        }
+        return $results;
+    }
+
+    /**
+     * Store multiple items in the cache for a given number of seconds.
+     *
+     * @param  array  $values
+     * @param  int  $seconds
+     * @return bool
+     */
+    public function putMany(array $values, $seconds)
+    {
+        foreach ($values as $key => $value) {
+            $this->put($key, $value, $seconds);
+        }
+        return true;
     }
 }
