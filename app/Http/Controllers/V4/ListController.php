@@ -343,6 +343,19 @@ class ListController extends V3Controller
     private function filterSfw(array $items): array
     {
         return array_values(array_filter($items, function ($item) {
+            // Check rated field: Rx = Hentai
+            $rated = $item['rated'] ?? '';
+            if (strtolower($rated) === 'rx') {
+                return false;
+            }
+
+            // Check type field
+            $type = strtolower($item['type'] ?? '');
+            if ($type === 'hentai') {
+                return false;
+            }
+
+            // Check all genre arrays for NSFW IDs/names
             foreach (['genres', 'explicit_genres', 'demographics', 'themes'] as $key) {
                 foreach ($item[$key] ?? [] as $genre) {
                     $id = (int)($genre['mal_id'] ?? 0);
@@ -352,10 +365,7 @@ class ListController extends V3Controller
                     }
                 }
             }
-            $type = strtolower($item['type'] ?? '');
-            if ($type === 'hentai') {
-                return false;
-            }
+
             return true;
         }));
     }
