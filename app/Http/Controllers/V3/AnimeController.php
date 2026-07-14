@@ -76,8 +76,10 @@ class AnimeController extends Controller
                 'Summer' => 'summer', 'Fall' => 'fall',
             ];
             if (preg_match('/^(\w+)\s+(\d{4})$/', $premiered, $m)) {
-                $combined['season'] = strtolower($seasonMap[$m[1]] ?? $m[1]);
+                $seasonName = strtolower($seasonMap[$m[1]] ?? $m[1]);
+                $combined['season'] = $seasonName;
                 $combined['year'] = (int) $m[2];
+                $combined['string'] = $seasonName . '-' . $m[2];
             }
             // Remove the old string field
             unset($combined['premiered']);
