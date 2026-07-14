@@ -236,4 +236,17 @@ $app->router->group(
 );
 
 
+
+
+$app->router->group(
+    [
+        'prefix' => 'v4',
+        'namespace' => 'App\\Http\\Controllers\\V4',
+        'middleware' => $commonMiddleware
+    ],
+    function ($router) {
+        require __DIR__.'/../routes/web.v4.php';
+    }
+);
+
 return $app;
