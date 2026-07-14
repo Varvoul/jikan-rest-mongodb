@@ -299,114 +299,28 @@ class ListController extends V3Controller
         $page = max(1, (int)($request->get('page', 1)));
         $limit = $this->clampLimit((int)($request->get('limit', self::DEFAULT_LIMIT)));
 
-        $url = "https://myanimelist.net/recommendations.php?s=recent&t={$type}&page={$page}";
-
-        try {
-            $client = new Client();
-            $crawler = $client->request('GET', $url, [
-                'timeout' => 15,
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 500,
-                'type' => 'Exception',
-                'message' => 'Failed to fetch recommendations from MAL: ' . $e->getMessage(),
-                'error' => null,
-            ], 500);
-        }
-
-        $recommendations = [];
-        $isManga = ($type === 'manga');
-
-        $crawler->filter('.recommendation-browser-unit')->each(function ($node) use (&$recommendations, $isManga) {
-            $entry = [
-                'entry'    => null,
-                'content'  => null,
-                'user'     => null,
-                'date'     => null,
-            ];
-
-            // Extract all links with /anime/ or /manga/ prefix
-            $malLinks = [];
-            $node->filter('a')->each(function ($a) use (&$malLinks, $isManga) {
-                $href = $a->attr('href') ?? '';
-                $prefix = $isManga ? '/manga/' : '/anime/';
-                if (preg_match('#' . $prefix . '(\d+)/#', $href, $m)) {
-                    $malId = (int) $m[1];
-                    if (!in_array($malId, array_column($malLinks, 'mal_id'))) {
-                        $malLinks[] = [
-                            'mal_id' => $malId,
-                            'url'    => 'https://myanimelist.net' . $href,
-                            'title'  => trim($a->text()),
-                        ];
-                    }
-                }
-            });
-
-            // Extract images
-            $images = [];
-            $node->filter('img')->each(function ($img) use (&$images) {
-                $src = $img->attr('data-src') ?? $img->attr('src') ?? '';
-                if ($src && strpos($src, 'blank.gif') === false) {
-                    $images[] = $src;
-                }
-            });
-
-            if (count($malLinks) >= 2) {
-                $entry['entry'] = [
-                    'mal_id' => $malLinks[0]['mal_id'],
-                    'url'    => $malLinks[0]['url'],
-                    'title'  => $malLinks[0]['title'],
-                    'images' => ['jpg' => ['image_url' => $images[0] ?? '']],
-                ];
-                $entry['content'] = [
-                    'mal_id' => $malLinks[1]['mal_id'],
-                    'url'    => $malLinks[1]['url'],
-                    'title'  => $malLinks[1]['title'],
-                    'images' => ['jpg' => ['image_url' => $images[1] ?? '']],
-                ];
-            } elseif (count($malLinks) === 1) {
-                $entry['entry'] = [
-                    'mal_id' => $malLinks[0]['mal_id'],
-                    'url'    => $malLinks[0]['url'],
-                    'title'  => $malLinks[0]['title'],
-                    'images' => ['jpg' => ['image_url' => $images[0] ?? '']],
-                ];
-            }
-
-            // Extract user info
-            $node->filter('a')->each(function ($a) use (&$entry) {
-                $href = $a->attr('href') ?? '';
-                if (preg_match('#/profile/([^/]+)#', $href, $m)) {
-                    $entry['user'] = [
-                        'url'      => 'https://myanimelist.net' . $href,
-                        'username' => $m[1],
-                    ];
-                }
-            });
-
-            // Extract date
-            $node->filter('.lightLink')->each(function ($span) use (&$entry) {
-                $text = trim($span->text());
-                if (preg_match('/(\d{4}-\d{2}-\d{2})/', $text, $m)) {
-                    $entry['date'] = $m[1] . 'T00:00:00+00:00';
-                }
-            });
-
-            if ($entry['entry'] !== null) {
-                $recommendations[] = $entry;
-            }
-        });
-
-        $perPage = count($recommendations);
-        $lastPage = max(1, $page + 1);
-        if ($perPage < 20) {
-            $lastPage = $page;
-        }
-
-        $recommendations = array_slice($recommendations, 0, $limit);
-
-        return response($this->buildV4Response($recommendations, $page, $limit, $lastPage));
+        // MAL recommendations page is now JavaScript-rendered.
+        // The Jikan v2 parser library does not include RecentRecommendationsRequest.
+        // Use /v3/anime/{id}/recommendations or /v3/manga/{id}/recommendations instead.
+        return response()->json([
+            'status'  => 400,
+            'type'    => 'HttpException',
+            'message' => 'Recommendations listing is not available in this Jikan version. '
+                       . 'Use /v3/' . $type . '/{id}/recommendations for per-entry recommendations, '
+                       . 'or use /v4/' . $type . ' to browse entries and collect their IDs.',
+            'error'   => null,
+            'pagination' => [
+                'last_visible_page' => 1,
+                'has_next_page'     => false,
+                'current_page'      => 1,
+                'items' => [
+                    'count'    => 0,
+                    'total'    => 0,
+                    'per_page' => $limit,
+                ],
+            ],
+            'data' => [],
+        ], 400);
     }
 
     private function buildV4Response(array $data, int $page, int $limit, int $lastPage, ?int $total = null): string
