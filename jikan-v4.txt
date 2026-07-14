@@ -12,9 +12,47 @@ items.total = {total_number_of_animes_data} (e.g., 30371) → Total number of re
 
 items.per_page = 25 → Maximum results per page (the max limit can be set)
 
-Root anime endpoint with status and hentai filter: "https://api.jikan.moe/v4/seasons/now?sfw=true&page={page_number}&limit=25" When I use this endpoint from my self-host it should return exact JSON data jikan v4. All myanimelist status "currently airing" anime data is spread across pagination pages.
+Root "/anime" endpoints: 
+[ 
+Main Root anime endpoint with status and hentai filter: "https://api.jikan.moe/v4/anime?sfw=true&page={page_number}&limit=25" When I use this endpoint from my self-host it should return exact JSON data like the official Jikan v4. This is the main endpoint for searching and retrieving lists of anime data from MyAnimeList. It's the main root anime endpoint where all anime data is shown. All means all. Myanimelist all anime plus future ones as well when myanimelist gonna add then into their site. All myanimelist scraped anime will be spread across paginated pages and by default ordered from lower MAL ID to higher MAL ID. 
 
-Root anime endpoint with status and hentai filter: "https://api.jikan.moe/v4/seasons/upcoming?sfw=true&page={page_nmber}&limit=25" When I use this endpoint from my self-host it should return exact JSON data from the Jikan v4 official. All myanimelist status "Not yet aired" anime data is spread across pagination pages.
+Root anime endpoint with status and hentai filter: "https://api.jikan.moe/v4/seasons/now?sfw=true&page={page_number}&limit=25" When I use this endpoint from my self-host it should return exact JSON data like jikan v4. Myanimelist status "currently airing" all anime data is spread across pagination pages.
+
+Root anime endpoint with status and hentai filter: "https://api.jikan.moe/v4/seasons/upcoming?sfw=true&page={page_nmber}&limit=25" When I use this endpoint from my self-host it should return exact JSON data like the Jikan v4 official. Myanimelist status "Not yet aired", all anime data is spread across pagination pages.
+
+Root anime endpoint with status and hentai filter: "https://api.jikan.moe/v4/top/anime?filter=airing&sfw=true&page={page_number}&limit=25" When I use this endpoint from my self-host it should return exact JSON data like the Jikan v4 official. All myanimelist top airing anime data is spread across pagination pages. 
+
+Sub root "/anime' endpoints:
+Top-Ranking Anime (by Score)
+This returns anime ranked by their MyAnimeList score.
+
+Endpoint: /top/anime
+
+Default Behaviour: Returns the top-ranked list by score.
+
+Example:
+https://api.jikan.moe/v4/top/anime?sfw=true&page={page_number}&limit=25 -> the endpoint should return all top airing anime it scraped from MyAnimeList and spread across paginated pages. 
+
+Most Popular Anime
+This returns anime ranked by the number of members on MyAnimeList.
+
+Endpoint: /top/anime
+
+Filter Parameter: filter=bypopularity
+
+Example:
+https://api.jikan.moe/v4/top/anime?filter=bypopularity&sfw=true&page={page_number}&limit=25 -> the endpoint should return all top anime by popularity anime it scraped from MyAnimeList and spread across paginated pages.
+
+Most Favourited Anime
+This returns anime ranked by the number of times they've been added to users' favorites lists.
+
+Endpoint: /top/anime
+
+Filter Parameter: filter=favorite
+
+Example:
+https://api.jikan.moe/v4/top/anime?filter=favorite&sfw=true&page=1&limit=25 -> the endpoint should return all top anime by favourite anime it scraped from MyAnimeList and spread across paginated pages.
+] 
 
 I want the continuing parameter to be specifically used with Season endpoints to include long-running anime that started in a previous season but are still airing.
 How to Use It
@@ -37,8 +75,8 @@ Endpoint limitation: The continuing parameter only works with season endpoints (
 
 Known behaviour: Including continuing=true might return anime that don't strictly belong to that season. This is a known behaviour of the API
 
-Jikan v4 official "anime" endpoint page 1 limit 25 return response. I want my response to look and have all the data fields as well.
-Response:
+Jikan v4 official "anime" endpoint page 1 limit 25 return response. I want my "anime" root endpoints response to look the same as the Jikan v4 official anime endpoints, and each anime response to have all the data fields as well.
+Root "anime" endpoints Return Response (make sure it does not miss/cut out any data field exact same as jikan v4 oficial):
 {
   "pagination": {
     "last_visible_page": 1215,
@@ -4417,3 +4455,6 @@ Response:
     }
   ]
 }
+_________________________________________________________________________________________________________________________________
+
+
