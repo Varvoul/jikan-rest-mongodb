@@ -93,6 +93,16 @@ POLYFILL
     else
         echo "[entrypoint] WARNING: patch-related.php not found, skipping parser patch"
     fi
+
+    # Patch jikan-me/jikan AnimeParser for new MAL external links format
+    if [ -f /app/patch-external.php ]; then
+        echo "[entrypoint] Patching Jikan AnimeParser::getExternalLinks() for new MAL HTML..."
+        php /app/patch-external.php 2>&1 | tee /tmp/patch-external.log
+        PATCH_EXIT=${PIPESTATUS[0]}
+        if [ $PATCH_EXIT -ne 0 ]; then
+            echo "[entrypoint] WARNING: patch-external.php exited with code $PATCH_EXIT"
+        fi
+    fi
 else
     echo "[entrypoint] WARNING: vendor/autoload.php not found, skipping patches"
 fi

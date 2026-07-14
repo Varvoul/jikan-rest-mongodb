@@ -44,7 +44,6 @@ class AnimeController extends Controller
         $statsData = json_decode($this->serializer->serialize($statsResult, 'json'), true);
 
         // Combine all data into a single response
-        // Start with main data, then merge pictures, characters_staff, and stats
         $combined = $mainData;
 
         // Add pictures
@@ -61,11 +60,48 @@ class AnimeController extends Controller
         }
 
         // Add statistics
-        // Stats has: watching, completed, on_hold, dropped, plan_to_watch, total, scores array
         foreach ($statsData as $key => $value) {
             if (!isset($combined[$key])) {
                 $combined[$key] = $value;
             }
+        }
+
+        // === V4-style field transformations ===
+
+        // Transform premiered string ("Fall 2002") → season + year
+        if (isset($combined['premiered']) && is_string($combined['premiered']) && $combined['premiered'] !== '') {
+            $premiered = $combined['premiered'];
+            $seasonMap = [
+                'Winter' => 'winter', 'Spring' => 'spring',
+                'Summer' => 'summer', 'Fall' => 'fall',
+            ];
+            if (preg_match('/^(\w+)\s+(\d{4})$/', $premiered, $m)) {
+                $combined['season'] = strtolower($seasonMap[$m[1]] ?? $m[1]);
+                $combined['year'] = (int) $m[2];
+            }
+            // Remove the old string field
+            unset($combined['premiered']);
+        }
+
+        // Transform broadcast string ("Thursdays at 19:30 (JST)") → structured object
+        if (isset($combined['broadcast']) && is_string($combined['broadcast']) && $combined['broadcast'] !== '') {
+            $broadcast = $combined['broadcast'];
+            $broadcastObj = ['string' => $broadcast];
+
+            // Parse "Day at HH:MM (TZ)"
+            if (preg_match('/^(\w+)s?\s+at\s+(\d{1,2}:\d{2})\s*\(([^)]+)\)/i', $broadcast, $m)) {
+                $broadcastObj['day'] = $m[1];
+                $broadcastObj['time'] = $m[2];
+                $broadcastObj['timezone'] = $m[3];
+            } elseif (preg_match('/^(\w+)s?\s+at\s+(\d{1,2}:\d{2})/i', $broadcast, $m)) {
+                $broadcastObj['day'] = $m[1];
+                $broadcastObj['time'] = $m[2];
+                $broadcastObj['timezone'] = 'Asia/Tokyo';
+            } elseif (preg_match('/^(\w+)/', $broadcast, $m)) {
+                $broadcastObj['day'] = $m[1];
+            }
+
+            $combined['broadcast'] = $broadcastObj;
         }
 
         return response(json_encode($combined));
