@@ -72,11 +72,9 @@ $newMethod = <<<'METHOD'
     }
 METHOD;
 
-// Use regex to match and replace the getExternalLinks method
-$pattern = '/public\s+function\s+getExternalLinks\s*\(\s*\)\s*:\s*array\s*\{.*?return\s+\[\];\s*\}/s';
-
-// More specific pattern since "return [];" appears multiple times
-$pattern = '/public\s+function\s+getExternalLinks\s*\(\s*\)\s*:\s*array\s*\{.*?\n        return \[\];\s*\n    \}/s';
+// Use regex to match the full getExternalLinks method
+// Match from method signature through "External Links" to the closing brace
+$pattern = '/public\s+function\s+getExternalLinks\s*\(\s*\)\s*:\s*array\s*\{.*?External Links.*?\n    \}/s';
 
 if (!preg_match($pattern, $content)) {
     echo "[patch-external] ERROR: regex did not match getExternalLinks()\n";
