@@ -10,7 +10,6 @@ use Jikan\Request\Seasonal\SeasonalRequest;
 use Jikan\Request\Search\AnimeSearchRequest;
 use Jikan\Request\Search\MangaSearchRequest;
 use Jikan\Helper\Constants as JikanConstants;
-use Goutte\Client;
 
 class ListController extends V3Controller
 {
