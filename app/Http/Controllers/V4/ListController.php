@@ -181,7 +181,8 @@ class ListController extends V3Controller
 
         try {
             $result = $this->jikan->getTopAnime(new TopAnimeRequest($page, $type));
-            $data = json_decode($this->serializer->serialize($result, 'json'), true);
+            $wrapped = ['top' => $result];
+            $data = json_decode($this->serializer->serialize($wrapped, 'json'), true);
         } catch (\Exception $e) {
             return $this->errorResponse($e);
         }
@@ -214,7 +215,8 @@ class ListController extends V3Controller
 
         try {
             $result = $this->jikan->getTopManga(new TopMangaRequest($page, $type));
-            $data = json_decode($this->serializer->serialize($result, 'json'), true);
+            $wrapped = ['top' => $result];
+            $data = json_decode($this->serializer->serialize($wrapped, 'json'), true);
         } catch (\Exception $e) {
             return $this->errorResponse($e);
         }
