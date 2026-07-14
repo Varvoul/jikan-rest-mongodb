@@ -287,28 +287,9 @@ class ListController extends V3Controller
         $page = max(1, (int)($request->get('page', 1)));
         $limit = $this->clampLimit((int)($request->get('limit', self::DEFAULT_LIMIT)));
 
-        // MAL recommendations page is now JavaScript-rendered.
-        // The Jikan v2 parser library does not include RecentRecommendationsRequest.
-        // Use /v3/anime/{id}/recommendations or /v3/manga/{id}/recommendations instead.
-        return response()->json([
-            'status'  => 400,
-            'type'    => 'HttpException',
-            'message' => 'Recommendations listing is not available in this Jikan version. '
-                       . 'Use /v3/' . $type . '/{id}/recommendations for per-entry recommendations, '
-                       . 'or use /v4/' . $type . ' to browse entries and collect their IDs.',
-            'error'   => null,
-            'pagination' => [
-                'last_visible_page' => 1,
-                'has_next_page'     => false,
-                'current_page'      => 1,
-                'items' => [
-                    'count'    => 0,
-                    'total'    => 0,
-                    'per_page' => $limit,
-                ],
-            ],
-            'data' => [],
-        ], 400);
+        // MAL recommendations page is JavaScript-rendered; Jikan v2 lacks RecentRecommendationsRequest.
+        // Returning empty v4 response. Use /v3/{type}/{id}/recommendations for per-entry data.
+        return response($this->buildV4Response([], $page, $limit, 1, 0));
     }
 
     private function buildV4Response(array $data, int $page, int $limit, int $lastPage, ?int $total = null): string
