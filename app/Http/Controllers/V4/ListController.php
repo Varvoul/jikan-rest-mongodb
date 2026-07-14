@@ -109,12 +109,6 @@ class ListController extends V3Controller
                 : JikanConstants::SEARCH_SORT_DESCENDING
         );
 
-        // SFW: use MAL's built-in genre exclude for hentai
-        if ($sfw) {
-            $searchRequest->setGenre(12);
-            $searchRequest->setGenreExclude(true);
-        }
-
         return $this->fetchSearchResponse($searchRequest, 'getAnimeSearch', $page, $limit, $sfw);
     }
 
@@ -130,11 +124,6 @@ class ListController extends V3Controller
         $searchRequest = new MangaSearchRequest();
         $searchRequest->setStartsWithChar('');
         $searchRequest->setPage($page);
-
-        if ($sfw) {
-            $searchRequest->setGenre(12);
-            $searchRequest->setGenreExclude(true);
-        }
 
         return $this->fetchSearchResponse($searchRequest, 'getMangaSearch', $page, $limit, $sfw);
     }
