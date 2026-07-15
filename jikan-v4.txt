@@ -11160,7 +11160,7 @@ Episode "/{mal_id}/episode?page={page_number}" endpoint returns a response for a
 
 __________________________________________________________________________________________________________________
 
-The recommendation "https://api.jikan.moe/v4/anime/51553/recommendations" or with pagination "https://api.jikan.moe/v4/anime/51553/recommendations?page={page_number}" endpoint is the same as the Jikan v4 official endpoint for a specific anime. Scraped the full entire recomendations data from MyAnimeList for a specific anime. Do not miss a single anime data. I want the response to look exactly like this:
+The recommendation "https://api.jikan.moe/v4/anime/{mal_id}/recommendations" endpoint is the same as the Jikan v4 official endpoint for a specific anime. Based on that specific anime, it will scrape all the recommended anime users recommended in MyAnimeList. Scraped the full entire recomendations data from MyAnimeList for a specific anime. If all recommended anime scraped more than 25, then apply pagination on the endpoint. Do not miss a single anime data. I want the response to look exactly like this:
 {
   "data": [
     {
@@ -11543,3 +11543,47 @@ The recommendation "https://api.jikan.moe/v4/anime/51553/recommendations" or wit
     }
   ]
 }
+____________________________________________________________________________________________________________________________________
+
+I also want the jikan v4 official "https://api.jikan.moe/v4/schedules?day=friday&sfw=true&page={page_number&limit=25" endpoint in my jikan v4 version as well. When will I use the schedule endpoint with "day" filter, it should return all the "currently airing" status anime. Returns a list of currently airing anime, organized by their broadcast day.
+>  How to Filter by Day: 
+Filter the schedule by adding the day parameter to the request. The accepted values for the day parameter are the days of the week in lowercase:
+
+monday
+
+tuesday
+
+wednesday
+
+thursday
+
+friday
+
+saturday
+
+sunday
+
+There are also two special values in the request that can be used:
+
+other: For anime that don't have a specific broadcast day.
+
+unknown: For anime where the broadcast day is not known
+
+> Example Requests
+Here is how you would structure the requests for each day
+
+To get the schedule for Friday, filtered to exclude adult content, and with pagination: "https://api.jikan.moe/v4/schedules?day={day_name}&sfw=true&page={page_number&limit=25"
+
+> Other Useful Parameters:
+So, I can combine the day filter with other common Jikan parameters:
+
+01. sfw (boolean): Set to true to filter out adult (hentai) content.
+
+02. page (integer): Specifies the page number of results.
+
+03. limit (integer): Specifies the number of results per page (the maximum is usually 25).
+
+04. filter (string): Filter the results by anime type (e.g., tv, movie, ova, special).
+
+05. kids (boolean): Filter to include only anime for kids
+
