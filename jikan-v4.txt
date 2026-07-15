@@ -11677,7 +11677,7 @@ You can combine multiple filters in one request. For example, to get **TV anime 
 This approach will give me full flexibility to build complex queries.
 
 ______________________________________________________________________________________________________________________________________
-Every paginated endpoint + recommended endpoint should have every anime's JSON data fields across all anime on all paginated pages (the same as JSON below):
+Every paginated endpoint + recommended endpoint should have every anime's JSON data fields across all anime on all paginated pages (the same as JSON below). This is only applicable to those endpoints that return multiple anime across all paginated pages:
 
 "data": [
     {
@@ -11855,4 +11855,11 @@ Every paginated endpoint + recommended endpoint should have every anime's JSON d
     }
    ]
   }
+___________________________________________________________________________________________________________________
+
+Important!: "Make sure the main root "/anime" endpoint returns all anime that exist now + future ones when added in MyAnimeList. All means all anime, just ignore hentai anime. Myanimelist entire library."
+Note: Ensure all other (main root+root+subroot+By Type, Season, Year, and Studio+By Genre, Theme, and Demographic+Combining Filters)
+____________________________________________________________________________________________________________________
+
+
 
