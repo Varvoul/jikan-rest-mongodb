@@ -11587,3 +11587,92 @@ So, I can combine the day filter with other common Jikan parameters:
 
 05. kids (boolean): Filter to include only anime for kids
 
+______________________________________________________________________________________________________________________
+
+To scrape anime by filters like **type**, **season/year**, **genre**, **theme**, **demographic**, or **studio**, use Jikan v4's `/anime` search endpoint** with specific query parameters. Some filters use IDs while others use simple string values.
+
+Here’s a practical guide for each filter.
+
+---
+
+### 1. By Type, Season, Year, and Studio
+
+These use straightforward query parameters on the `/anime` endpoint.
+
+| Filter | Parameter | Value Example | Example URL |
+| :--- | :--- | :--- | :--- |
+| **Type** | `type` | `tv`, `movie`, `ova`, `ona`, `special`, `music` | `/v4/anime?type=tv&sfw=true` |
+| **Season** | `season` | `winter`, `spring`, `summer`, `fall` | `/v4/anime?season=summer&year=2024&sfw=true` |
+| **Year** | `start_date` / `end_date` | `YYYY-MM-DD` | `/v4/anime?start_date=2024-01-01&end_date=2024-12-31&sfw=true` |
+| **Studio** | `producers` | Studio ID (e.g., `1` for Sunrise) | `/v4/anime?producers=1&sfw=true` |
+
+**Notes:**
+*   The `type` parameter filters by the anime's format.
+*   For **season** and **year**, I can use the `season` and `year` parameters together (e.g., `?season=summer&year=2024`) or separately, both ways. For a date range, use `start_date` and `end_date`.
+*   `producers` actually refers to **studios** and producers. 
+
+---
+
+### 2. By Genre, Theme, and Demographic
+
+These filters also use the `/anime` endpoint, but they require **numeric IDs** that you must fetch first from the `/genres/anime` endpoint.
+
+**Step 1: Get the ID for your filter.**
+
+Call the genres endpoint to get a list of all genres, themes, and demographics with their IDs.
+
+```
+GET /v4/genres/anime
+```
+
+> Step 2: Use the ID in your search.
+
+Once I have the ID, I can use it with the `genres` parameter on the `/anime` endpoint.
+
+| Filter | Parameter | Value | Example URL |
+| :--- | :--- | :--- | :--- |
+| **Genre** | `genres` | ID(s) comma-separated | `/v4/anime?genres=1,2&sfw=true` (Action & Adventure) |
+| **Theme** | `genres` | ID(s) comma-separated | `/v4/anime?genres=39&sfw=true` (for "Military" theme) |
+| **Demographic** | `genres` | ID(s) comma-separated | `/v4/anime?genres=27&sfw=true` (for "Shounen" demographic) |
+
+**Important Notes:**
+*   Genres, themes, and demographics are all returned from the `/genres/anime` endpoint and are all filtered using the **same `genres` parameter**.
+*   You can combine multiple IDs with commas (e.g., `genres=1,2,3`).
+*   To **exclude** certain genres, use the `genres_exclude` parameter.
+
+---
+
+> Common Parameters for All Searches
+
+You can add these to any of the above requests:
+
+| Parameter | Description |
+| :--- | :--- |
+| `sfw=true` | **Essential** – Filters out adult/hentai content |
+| `page` | Page number for pagination |
+| `limit` | Results per page (max 25) |
+| `order_by` | Sort by `score`, `popularity`, `title`, `start_date`, etc. |
+| `sort` | `desc` (default) or `asc` |
+
+> Quick Reference Table
+
+| What You Want | Endpoint & Parameters | Example |
+| :--- | :--- | :--- |
+| **By Type** (TV) | `/anime?type=tv` | `/v4/anime?type=tv&sfw=true&limit=25` |
+| **By Season/Year** | `/anime?season=summer&year=2024` | `/v4/anime?season=summer&year=2024&sfw=true` |
+| **By Year Range** | `/anime?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` | `/v4/anime?start_date=2024-01-01&end_date=2024-12-31&sfw=true` |
+| **By Studio** | `/anime?producers={studio_id}` | `/v4/anime?producers=1&sfw=true` |
+| **By Genre/Theme/Demographic** | `/anime?genres={id}` | `/v4/anime?genres=1,2&sfw=true` |
+| **Get All Genre IDs** | `/genres/anime` | `/v4/genres/anime` |
+
+> Pro Tip: Combining Filters
+
+You can combine multiple filters in one request. For example, to get **TV anime from Summer 2024 that are Action or Adventure and SFW**:
+
+```
+/v4/anime?type=tv&season=summer&year=2024&genres=1,2&sfw=true&page=1&limit=25
+
+```
+
+This approach will give me full flexibility to build complex queries.
+
