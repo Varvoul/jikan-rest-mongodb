@@ -11913,4 +11913,8 @@ Note: Ensure all other (main root+root+subroot+By Type, Season, Year, and Studio
 ____________________________________________________________________________________________________________________
 
 
+I would like to call my self-hosted jikan v4 "Toki"
+
+You may see a project in render names "jikan-self-host" That project was jikan v3. I do not want you to do anything to that project. After building jikan v4, verify everything is working perfectly, and return responses the same as jikan v4. All endpoints are working. All endpoints are scraping all anime to that endpoint released. I want MongoDB to cache and store the scraped data from MyAnimeList for 72 hours at each endpoint. 
+
 
