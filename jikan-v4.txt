@@ -11595,7 +11595,7 @@ Here’s a practical guide for each filter.
 
 ---
 
-### 1. By Type, Season, Year, and Studio
+1. By Type, Season, Year, and Studio
 
 These use straightforward query parameters on the `/anime` endpoint.
 
@@ -11613,19 +11613,19 @@ These use straightforward query parameters on the `/anime` endpoint.
 
 ---
 
-### 2. By Genre, Theme, and Demographic
+2. By Genre, Theme, and Demographic
 
-These filters also use the `/anime` endpoint, but they require **numeric IDs** that you must fetch first from the `/genres/anime` endpoint.
+These filters also use the `/anime` endpoint, but they require "numeric IDs" so I can fetch first from the `/genres/anime` endpoint.
 
 **Step 1: Get the ID for your filter.**
 
 Call the genres endpoint to get a list of all genres, themes, and demographics with their IDs.
 
 ```
-GET /v4/genres/anime
+GET '/v4/genres/anime'
 ```
 
-> Step 2: Use the ID in your search.
+> Step 2: Use the ID in the search.
 
 Once I have the ID, I can use it with the `genres` parameter on the `/anime` endpoint.
 
@@ -11637,14 +11637,14 @@ Once I have the ID, I can use it with the `genres` parameter on the `/anime` end
 
 **Important Notes:**
 *   Genres, themes, and demographics are all returned from the `/genres/anime` endpoint and are all filtered using the **same `genres` parameter**.
-*   You can combine multiple IDs with commas (e.g., `genres=1,2,3`).
+*   I can combine multiple IDs with commas (e.g., `genres=1,2,3`).
 *   To **exclude** certain genres, use the `genres_exclude` parameter.
 
 ---
 
 > Common Parameters for All Searches
 
-You can add these to any of the above requests:
+I can add these to any of the above requests:
 
 | Parameter | Description |
 | :--- | :--- |
@@ -11656,7 +11656,7 @@ You can add these to any of the above requests:
 
 > Quick Reference Table
 
-| What You Want | Endpoint & Parameters | Example |
+| What I Want | Endpoint & Parameters | Example |
 | :--- | :--- | :--- |
 | **By Type** (TV) | `/anime?type=tv` | `/v4/anime?type=tv&sfw=true&limit=25` |
 | **By Season/Year** | `/anime?season=summer&year=2024` | `/v4/anime?season=summer&year=2024&sfw=true` |
@@ -11667,10 +11667,10 @@ You can add these to any of the above requests:
 
 > Pro Tip: Combining Filters
 
-You can combine multiple filters in one request. For example, to get **TV anime from Summer 2024 that are Action or Adventure and SFW**:
+I can combine multiple filters in one request. For example, to get **TV anime from Summer 2024 that are Action or Adventure and SFW**:
 
 ```
-/v4/anime?type=tv&season=summer&year=2024&genres=1,2&sfw=true&page=1&limit=25
+'/v4/anime?type=tv&season=summer&year=2024&genres=1,2&sfw=true&page=1&limit=25'
 
 ```
 
@@ -11855,10 +11855,61 @@ Every paginated endpoint + recommended endpoint should have every anime's JSON d
     }
    ]
   }
+_______________________________________________________________________________________________________________
+
+I also want Jikan v4 official:
+Endpoint | Response | the same as the Jikan v4 return response
+|---|----------|----------|
+`GET /v4/character/1` | `{name:"Spike Spiegel", animeography:[3], mangaography:[2], voice_actors:[14]}` | Return response must be exactly same as jikan v4
+`GET /v4/character/1/pictures` | `{pictures:[20]}` | Return response must be exactly same as jikan v4
+`GET /v4/person/1` | `{name:"Tomokazu Seki", birthday:"1972-09-08", member_favorites:6282}` | Return response must be exactly same as jikan v4
+`GET /v4/person/1/pictures` | `{pictures:[8]}` | Return response must be exactly same as jikan v4
+
 ___________________________________________________________________________________________________________________
 
-Important!: "Make sure the main root "/anime" endpoint returns all anime that exist now + future ones when added in MyAnimeList. All means all anime, just ignore hentai anime. Myanimelist entire library."
-Note: Ensure all other (main root+root+subroot+By Type, Season, Year, and Studio+By Genre, Theme, and Demographic+Combining Filters)
+Top 'anime' endpoint and response:
+Endpoint | Response | jikan v4 response
+|---|----------|----------|
+`GET /v4/top/anime/1` | `top:[50]` — #1: "Sousou no Frieren" (score 9.26) |  Return response must be exactly same as jikan v4
+`GET /v4/top/anime/1/bypopularity` | #1: "Shingeki no Kyojin" (4.4M members) |  Return response must be exactly same as jikan v4
+`GET /v4/top/manga/1` | #1: "Berserk" (score 9.46) |  Return response must be exactly same as jikan v4
+`GET /v4/top/characters/1` | #1: (180K favorites) |  Return response must be exactly same as jikan v4
+`GET /v4/top/people/1` | #1: (108K favorites) |  Return response must be exactly same as jikan v4
+
+______________________________________________________________________________________________________________________
+
+Search endpoints:
+Endpoint | Response | Jikan v4 response
+|---|----------|----------|
+`GET /v3/search/anime?q=one piece&page=1` | `{results:[50], last_page:20}` |  Return response must be exactly same as jikan v4
+`GET /v3/search/manga?q=naruto` | `{results:[47], last_page:20}` |  Return response must be exactly same as jikan v4
+`GET /v3/search/character?q=naruto` | `{results:[50], last_page:7}` |  Return response must be exactly same as jikan v4
+`GET /v3/search/people?q=miyano` | `{results:[25], last_page:1}` |  Return response must be exactly same as jikan v4
+
+_______________________________________________________________________________________________________________________
+
+Some more Anime Endpoints:
+
+| # | Endpoint | Response | Jikan v4 response
+|---|----------|----------|
+`GET /v4/anime/1` | 
+`GET /v4/anime/1/characters-staff` | `{characters:[126], staff:[123]}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/episodes/1` | `{episodes_last_page:1, episodes:[]}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/videos` | `{promo:[], episodes_videos:[]}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/pictures` | `{pictures:[14 items]}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/stats` | `{watching:190784, completed:1203324, on_hold:117226, dropped:49833, plan_to_watch:510503, total:2071670, scores:[10]}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/news` | `{articles:[9 items]}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/forum` | `{topics:[15]}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/reviews/1` | `{reviews:[], last_page:?}` | Return response must be exactly same as jikan v4
+`GET /v4/anime/1/userupdates/1` | `{users:[75]}` | Return response must be exactly same as jikan v4
+GET /v4/user/Xinil	| {username:"Xinil", joined:"2004-11-05", anime_stats:{days_watched:142.3}} | Return response must be exactly same as jikan v4
+GET /v4/producer/1	| {anime:[329]} | Return response must be exactly same as jikan v4
+GET /v4/club/1	| {name, members, category} | Return response must be exactly same as jikan v4
+
+___________________________________________________________________________________________________________________
+
+Important!: "Make sure the main root '/v4/anime?sfw=true&page={page_number}&limit=25' endpoint returns all anime that exist now + future ones when added in MyAnimeList. All means all anime, just ignore hentai anime. Myanimelist entire library(more than 30,000+) and growing with each scrape with (existing+new) ones. Spread across all paginated pages by default shorting lower mal id to higher mal ids"
+Note: Ensure all other (main root+root+subroot+By Type, Season, Year, and Studio+By Genre, Theme, and Demographic+Combining Filters) endpoints also scrape all anime related to that endpoint from MyAnimeList's entire data, with every scrape (existing+new) added to the mal. Use the official jikan v4 default shorting for my self-hosted version as well.
 ____________________________________________________________________________________________________________________
 
 
