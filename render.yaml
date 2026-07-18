@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: jikan-api-bohb
+    runtime: docker
+    plan: free
+    region: oregon
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: CACHE_DRIVER
+        value: mongodb
+      - key: MONGO_URI
+        sync: false
+      - key: DB_DATABASE
+        value: jikan
+      - key: APP_KEY
+        value: "base64:V3F3aGFNdWVFYnJGVHVjVG9oWWJSWmZjR3M9"
