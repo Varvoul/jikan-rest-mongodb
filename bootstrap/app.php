@@ -12,7 +12,7 @@ require_once __DIR__.'/../vendor/autoload.php';
     Defines
 */
 defined('JIKAN_PARSER_VERSION') or define('JIKAN_PARSER_VERSION', Versions::getVersion('jikan-me/jikan'));
-defined('JIKAN_REST_API_VERSION') or define('JIKAN_REST_API_VERSION', '3.4.3');
+defined('JIKAN_REST_API_VERSION') or define('JIKAN_REST_API_VERSION', '4.0.0');
 
 
 /*
@@ -152,7 +152,7 @@ if (env('APP_BROWNOUT')) {
 
 $app->router->group(
     [
-        'prefix' => 'v3',
+        'prefix' => 'v4',
         'namespace' => 'App\Http\Controllers\V3',
         'middleware' => $commonMiddleware
     ],
@@ -190,7 +190,7 @@ $app->router->group(
                 'Website' => 'https://jikan.moe',
                 'Docs' => 'https://jikan.docs.apiary.io',
                 'GitHub' => 'https://github.com/jikan-me/jikan',
-                'PRODUCTION_API_URL' => 'https://api.jikan.moe/v3/',
+                'PRODUCTION_API_URL' => 'https://api.jikan.moe/v4/',
                 'STATUS_URL' => 'https://status.jikan.moe'
             ];
 
@@ -240,13 +240,5 @@ $app->router->group(
 
 $app->router->group(
     [
-        'prefix' => 'v4',
-        'namespace' => 'App\\Http\\Controllers\\V4',
-        'middleware' => $commonMiddleware
-    ],
-    function ($router) {
-        require __DIR__.'/../routes/web.v4.php';
-    }
-);
 
 return $app;
