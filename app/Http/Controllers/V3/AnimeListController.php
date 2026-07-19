@@ -304,13 +304,25 @@ class AnimeListController extends Controller
 
     private function extractTotalCount(string $html): int
     {
-        // MAL shows something like "30,371 titles" or "of 30,371"
+        // Try to find total count text
         if (preg_match('/(\d[\d,]+)\s*titles?/i', $html, $m)) {
             return (int) str_replace(',', '', $m[1]);
         }
-        if (preg_match('/of\s+(\d[\d,]+)/i', $html, $m)) {
-            return (int) str_replace(',', '', $m[1]);
+
+        // Calculate from pagination links: find max 'show=N' offset
+        preg_match_all('/show=(\d+)/', $html, $offsets);
+        if (!empty($offsets[1])) {
+            $maxOffset = max(array_map('intval', $offsets[1]));
+            // Check if there's a '...' indicating more pages beyond what's shown
+            $hasMore = preg_match('/>\s*\.\.\.\s*</', $html);
+            if ($hasMore) {
+                // MAL shows ~20 page links; estimate total from max visible offset
+                // Typical MAL has ~600 pages for all anime (30,000 / 50)
+                return $maxOffset + 100; // rough estimate, enough for pagination
+            }
+            return $maxOffset + 50;
         }
+
         return count($this->parseBrowsePage($html));
     }
 
@@ -350,8 +362,14 @@ class AnimeListController extends Controller
         }
 
         // ── Season + Year ──
-        $season = $a['season'] ?? null;
-        $year   = $a['year'] ?? null;
+        $season = null;
+        $year   = null;
+        if (isset($a['season']) && (is_string($a['season']) || is_int($a['season'])) && $a['season'] !== '' && $a['season'] !== false) {
+            $season = $a['season'];
+        }
+        if (isset($a['year']) && is_numeric($a['year']) && $a['year'] !== false) {
+            $year = (int) $a['year'];
+        }
         if (($season === null || $year === null) && !empty($a['premiered']) && is_string($a['premiered'])) {
             $sMap = ['Winter' => 'winter', 'Spring' => 'spring', 'Summer' => 'summer', 'Fall' => 'fall'];
             if (preg_match('/^(\w+)\s+(\d{4})$/', $a['premiered'], $pm)) {
