@@ -148,19 +148,19 @@ class AnimeListController extends Controller
             ]);
             $html = (string) $response->getBody();
         } catch (\Exception $e) {
-            return response()->json([
+            return response(json_encode([
                 'status' => 500,
                 'type' => 'Exception',
                 'message' => 'Failed to reach MyAnimeList: ' . $e->getMessage(),
                 'error' => null,
-            ], 500);
+            ]), 500);
         }
 
         // ── Parse anime entries from HTML ──────────────────────────────
         $animeEntries = $this->parseBrowsePage($html);
 
         if (empty($animeEntries)) {
-            return response()->json([
+            return response(json_encode([
                 'pagination' => [
                     'last_visible_page' => 1,
                     'has_next_page' => false,
@@ -168,7 +168,7 @@ class AnimeListController extends Controller
                     'items' => ['count' => 0, 'total' => 0, 'per_page' => $limit],
                 ],
                 'data' => [],
-            ]);
+            ]));
         }
 
         // ── Slice for current page ─────────────────────────────────────
@@ -191,7 +191,7 @@ class AnimeListController extends Controller
         $total = $this->extractTotalCount($html);
         $lastPage = max(1, (int) ceil($total / $limit));
 
-        return response()->json([
+        $response = [
             'pagination' => [
                 'last_visible_page' => $lastPage,
                 'has_next_page'     => $page < $lastPage,
@@ -203,7 +203,8 @@ class AnimeListController extends Controller
                 ],
             ],
             'data' => $animeList,
-        ]);
+        ];
+        return response(json_encode($response));
     }
 
     // ─── HTML parsing ──────────────────────────────────────────────────
