@@ -57,6 +57,12 @@ $router->group(
     }
 );
 
+
+// ── Anime listing (must be before anime/{id} group) ──
+$router->get('/anime', [
+    'uses' => 'AnimeListController@index'
+]);
+
 $router->group(
     [
         'prefix' => 'anime/{id:[0-9]+}'
