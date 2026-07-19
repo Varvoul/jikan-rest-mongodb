@@ -149,15 +149,13 @@ class AnimeListController extends Controller
      * Get the total anime count from MAL, cached for 24 hours in MongoDB.
      *
      * MAL's browse page shows 50 anime per page at ?show=OFFSET.
-     * There's no explicit total count, so we use binary search:
+     * Strategy (minimal probes, rate-limit safe):
      *  1. Return cached value if available (24 h TTL).
-     *  2. Start from FALLBACK_TOTAL rounded down to 50.
-     *  3. If that page is full, probe forward in doubling jumps
-     *     to find an upper bound where results run out.
-     *  4. Binary search between lo (full page) and hi (empty/partial)
-     *     to find the exact last page with results.
-     *  5. total = last_full_offset + 50  or  lo + count_at_lo.
-     *  6. Cache the result; fall back to FALLBACK_TOTAL on error.
+     *  2. Fetch ONE page near the known total.
+     *  3. If partial page (1-49 results): total = offset + count (exact).
+     *  4. If full page (50): try next page to detect growth.
+     *  5. If empty (0): MAL is likely rate-limiting — return FALLBACK_TOTAL
+     *     WITHOUT caching, so we retry next time.
      */
     private function getAnimeTotal(): int
     {
@@ -169,80 +167,51 @@ class AnimeListController extends Controller
         try {
             $client  = app('GuzzleClient');
             $headers = [
-                'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept'          => 'text/html',
+                'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language' => 'en-US,en;q=0.5',
             ];
 
-            $perPage = 50; // MAL browse page size
+            $perPage = 50;
             $known   = self::FALLBACK_TOTAL;
+            $offset  = intdiv($known, $perPage) * $perPage;
 
-            // Step 1: Check near the known total
-            $baseOffset = intdiv($known, $perPage) * $perPage; // round down to 50
-            $count      = $this->countAtOffset($client, $headers, $baseOffset);
+            // Single probe at the tail end
+            $count = $this->countAtOffset($client, $headers, $offset);
 
-            if ($count === 0) {
-                // Known total is too high — binary search downward
-                $lo = 0;
-                $hi = $baseOffset;
-            } elseif ($count >= $perPage) {
-                // Page is full — more anime may exist beyond.
-                // Probe forward in doubling jumps to find upper bound
-                $lo = $baseOffset;
-                $hi = $baseOffset + $perPage;
-                while ($this->countAtOffset($client, $headers, $hi) >= $perPage) {
-                    $lo = $hi;
-                    $hi += $perPage * 2;
-                    if ($hi > 100000) break; // safety limit
-                }
-            } else {
-                // Partial page — we're right at the tail end
-                $total = $baseOffset + $count;
+            if ($count > 0 && $count < $perPage) {
+                // Partial page at the tail — exact total
+                $total = $offset + $count;
                 Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
                 return $total;
             }
 
-            // Step 2: Binary search between lo (has results) and hi (no/partial results)
-            // Max ~7 iterations (log2 of range / 50)
-            $maxProbes = 8;
-            $probes    = 0;
-            while ($hi - $lo > $perPage && $probes < $maxProbes) {
-                $probes++;
-                $mid    = intdiv($lo + $hi, 2);
-                $mid    = intdiv($mid, $perPage) * $perPage; // align to page boundary
-                if ($mid <= $lo) {
-                    $mid = $lo + $perPage;
+            if ($count >= $perPage) {
+                // Full page — anime exist at least up to offset + 50
+                $total = $offset + $perPage;
+                // Try one page ahead to detect growth (max 1 extra request)
+                $nextCount = $this->countAtOffset($client, $headers, $offset + $perPage);
+                if ($nextCount > 0) {
+                    $total = $offset + $perPage + $nextCount;
                 }
-                $midCnt = $this->countAtOffset($client, $headers, $mid);
-
-                if ($midCnt >= $perPage) {
-                    $lo = $mid; // still full, search higher
-                } else {
-                    $hi = $mid; // partial or empty, search lower
-                }
-            }
-
-            // $lo is the last offset with a full page (50 results).
-            // Total is either lo + 50, or if $lo page was partial, lo + count.
-            // One final probe at $lo to get the exact count.
-            $finalCount = $this->countAtOffset($client, $headers, $lo);
-            $total = ($finalCount > 0) ? $lo + $finalCount : $lo;
-
-            if ($total > 0) {
                 Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
                 return $total;
             }
+
+            // count === 0: MAL is almost certainly rate-limiting us
+            // (the page at offset 30200 should have results).
+            // Do NOT cache — we'll retry on the next uncached request.
+
         } catch (\Exception $e) {
-            // MAL unreachable — use fallback
+            // MAL unreachable — don't cache, retry later
         }
 
-        Cache::put(self::TOTAL_CACHE_KEY, self::FALLBACK_TOTAL, self::TOTAL_CACHE_TTL);
         return self::FALLBACK_TOTAL;
     }
 
     /**
      * Fetch MAL browse page at the given offset and count anime rows.
-     * Returns the number of anime entries found (0 if page is empty).
+     * Returns the number of anime entries found (0 if page is empty/blocked).
      */
     private function countAtOffset($client, array $headers, int $offset): int
     {
@@ -252,8 +221,10 @@ class AnimeListController extends Controller
         ]);
         $html  = (string) $response->getBody();
         $count = substr_count($html, 'class="picSurround"');
-        return min($count, 50); // cap at page size
+        return min($count, 50);
     }
+
+
 
     // ═══════════════════════════════════════════════════════════════════
     //  FILTERED: MAL browse page scraping
