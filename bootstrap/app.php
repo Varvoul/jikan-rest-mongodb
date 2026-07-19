@@ -235,10 +235,4 @@ $app->router->group(
     }
 );
 
-
-
-
-$app->router->group(
-    [
-
 return $app;
