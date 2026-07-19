@@ -326,8 +326,9 @@ class AnimeListController extends Controller
             }
 
             if ($hasMore) {
-                // Filtered with more pages: estimate ~10x visible pages
-                return $maxOffset * 10 + 50;
+                // Filtered with more pages: MAL typically shows all pages for filtered
+                // results, so maxOffset + 50 is usually accurate
+                return $maxOffset + 50;
             }
 
             return $maxOffset + 50;
