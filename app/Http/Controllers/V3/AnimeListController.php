@@ -4,15 +4,21 @@ namespace App\Http\Controllers\V3;
 
 use Illuminate\Http\Request;
 use Jikan\Request\Anime\AnimeRequest;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class AnimeListController extends Controller
 {
     /**
-     * Known total anime count on MAL.
-     * Updated periodically; used for unfiltered pagination.
+     * Fallback total if MAL is unreachable.
+     * The real total is fetched dynamically and cached.
      */
-    private const TOTAL_ANIME = 30371;
+    private const FALLBACK_TOTAL = 30371;
+
+    /**
+     * Cache key and TTL for the dynamic anime total.
+     */
+    private const TOTAL_CACHE_KEY = 'anime_list_total_count';
+    private const TOTAL_CACHE_TTL = 86400; // 24 hours
 
     /**
      * GET /anime — List all anime
@@ -79,7 +85,7 @@ class AnimeListController extends Controller
      */
     private function listByIdOrder(int $page, int $limit, bool $descending = false)
     {
-        $total    = self::TOTAL_ANIME;
+        $total    = $this->getAnimeTotal();
         $lastPage = max(1, (int) ceil($total / $limit));
 
         // Clamp page to valid range
@@ -133,6 +139,71 @@ class AnimeListController extends Controller
         });
 
         return $this->buildPaginatedResponse($animeList, $page, $lastPage, $total, $limit);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Dynamic total count
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Get the total anime count from MAL, cached for 24 hours in MongoDB.
+     * Scrapes MAL's browse page (show=0) and extracts the count from the
+     * "X titles" text. Falls back to FALLBACK_TOTAL on failure.
+     */
+    private function getAnimeTotal(): int
+    {
+        // Check MongoDB cache first (via Laravel Cache facade)
+        $cached = Cache::get(self::TOTAL_CACHE_KEY);
+        if ($cached !== null && is_numeric($cached)) {
+            return (int) $cached;
+        }
+
+        // Scrape MAL's browse page to get the real total
+        try {
+            $client   = app('GuzzleClient');
+            $response = $client->get('https://myanimelist.net/anime.php?show=0', [
+                'headers' => [
+                    'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept'          => 'text/html',
+                    'Accept-Language' => 'en-US,en;q=0.5',
+                ],
+                'timeout' => 10,
+            ]);
+            $html = (string) $response->getBody();
+
+            // MAL shows total as "30,371 titles" or "30,371 Anime Titles" etc.
+            if (preg_match('/(\d[\d,]+)\s*(?:anime\s*)?titles?/i', $html, $m)) {
+                $total = (int) str_replace(',', '', $m[1]);
+                if ($total > 0) {
+                    Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
+                    return $total;
+                }
+            }
+
+            // Fallback: count from pagination links
+            preg_match_all('/show=(\d+)/', $html, $offsets);
+            if (!empty($offsets[1])) {
+                $maxOffset = max(array_map('intval', $offsets[1]));
+                $hasMore   = preg_match('/>\s*\.\.\.\s*</', $html);
+                if ($hasMore) {
+                    // MAL only shows ~20 page links — estimate from last visible + pages beyond
+                    // Use a known multiplier: total ≈ maxVisibleOffset × (totalPages / visiblePages)
+                    // Approximation: 30371 corresponds to show=9500 in the visible links
+                    $estimated = (int) ($maxOffset * 3.2);
+                    Cache::put(self::TOTAL_CACHE_KEY, $estimated, self::TOTAL_CACHE_TTL);
+                    return $estimated;
+                }
+                $total = $maxOffset + 50;
+                Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
+                return $total;
+            }
+        } catch (\Exception $e) {
+            // MAL unreachable — use fallback
+        }
+
+        // Ultimate fallback
+        Cache::put(self::TOTAL_CACHE_KEY, self::FALLBACK_TOTAL, self::TOTAL_CACHE_TTL);
+        return self::FALLBACK_TOTAL;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -444,7 +515,7 @@ class AnimeListController extends Controller
             $hasMore   = preg_match('/>\s*\.\.\.\s*</', $html);
 
             if ($hasMore && !$hasFilters) {
-                return self::TOTAL_ANIME;
+                return $this->getAnimeTotal();
             }
 
             return $maxOffset + 50;
