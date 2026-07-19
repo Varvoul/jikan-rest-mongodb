@@ -12,7 +12,7 @@ class AnimeListController extends Controller
      * Fallback total if MAL is unreachable.
      * The real total is fetched dynamically and cached.
      */
-    private const FALLBACK_TOTAL = 30371;
+    private const FALLBACK_TOTAL = 30230;
 
     /**
      * Cache key and TTL for the dynamic anime total.
@@ -147,53 +147,88 @@ class AnimeListController extends Controller
 
     /**
      * Get the total anime count from MAL, cached for 24 hours in MongoDB.
-     * Scrapes MAL's browse page (show=0) and extracts the count from the
-     * "X titles" text. Falls back to FALLBACK_TOTAL on failure.
+     *
+     * MAL's browse page shows 50 anime per page at ?show=OFFSET.
+     * There's no explicit total count, so we use binary search:
+     *  1. Return cached value if available (24 h TTL).
+     *  2. Start from FALLBACK_TOTAL rounded down to 50.
+     *  3. If that page is full, probe forward in doubling jumps
+     *     to find an upper bound where results run out.
+     *  4. Binary search between lo (full page) and hi (empty/partial)
+     *     to find the exact last page with results.
+     *  5. total = last_full_offset + 50  or  lo + count_at_lo.
+     *  6. Cache the result; fall back to FALLBACK_TOTAL on error.
      */
     private function getAnimeTotal(): int
     {
-        // Check MongoDB cache first (via Laravel Cache facade)
         $cached = Cache::get(self::TOTAL_CACHE_KEY);
         if ($cached !== null && is_numeric($cached)) {
             return (int) $cached;
         }
 
-        // Scrape MAL's browse page to get the real total
         try {
-            $client   = app('GuzzleClient');
-            $response = $client->get('https://myanimelist.net/anime.php?show=0', [
-                'headers' => [
-                    'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept'          => 'text/html',
-                    'Accept-Language' => 'en-US,en;q=0.5',
-                ],
-                'timeout' => 10,
-            ]);
-            $html = (string) $response->getBody();
+            $client  = app('GuzzleClient');
+            $headers = [
+                'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept'          => 'text/html',
+                'Accept-Language' => 'en-US,en;q=0.5',
+            ];
 
-            // MAL shows total as "30,371 titles" or "30,371 Anime Titles" etc.
-            if (preg_match('/(\d[\d,]+)\s*(?:anime\s*)?titles?/i', $html, $m)) {
-                $total = (int) str_replace(',', '', $m[1]);
-                if ($total > 0) {
-                    Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
-                    return $total;
+            $perPage = 50; // MAL browse page size
+            $known   = self::FALLBACK_TOTAL;
+
+            // Step 1: Check near the known total
+            $baseOffset = intdiv($known, $perPage) * $perPage; // round down to 50
+            $count      = $this->countAtOffset($client, $headers, $baseOffset);
+
+            if ($count === 0) {
+                // Known total is too high — binary search downward
+                $lo = 0;
+                $hi = $baseOffset;
+            } elseif ($count >= $perPage) {
+                // Page is full — more anime may exist beyond.
+                // Probe forward in doubling jumps to find upper bound
+                $lo = $baseOffset;
+                $hi = $baseOffset + $perPage;
+                while ($this->countAtOffset($client, $headers, $hi) >= $perPage) {
+                    $lo = $hi;
+                    $hi += $perPage * 2;
+                    if ($hi > 100000) break; // safety limit
+                }
+            } else {
+                // Partial page — we're right at the tail end
+                $total = $baseOffset + $count;
+                Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
+                return $total;
+            }
+
+            // Step 2: Binary search between lo (has results) and hi (no/partial results)
+            // Max ~7 iterations (log2 of range / 50)
+            $maxProbes = 8;
+            $probes    = 0;
+            while ($hi - $lo > $perPage && $probes < $maxProbes) {
+                $probes++;
+                $mid    = intdiv($lo + $hi, 2);
+                $mid    = intdiv($mid, $perPage) * $perPage; // align to page boundary
+                if ($mid <= $lo) {
+                    $mid = $lo + $perPage;
+                }
+                $midCnt = $this->countAtOffset($client, $headers, $mid);
+
+                if ($midCnt >= $perPage) {
+                    $lo = $mid; // still full, search higher
+                } else {
+                    $hi = $mid; // partial or empty, search lower
                 }
             }
 
-            // Fallback: count from pagination links
-            preg_match_all('/show=(\d+)/', $html, $offsets);
-            if (!empty($offsets[1])) {
-                $maxOffset = max(array_map('intval', $offsets[1]));
-                $hasMore   = preg_match('/>\s*\.\.\.\s*</', $html);
-                if ($hasMore) {
-                    // MAL only shows ~20 page links — estimate from last visible + pages beyond
-                    // Use a known multiplier: total ≈ maxVisibleOffset × (totalPages / visiblePages)
-                    // Approximation: 30371 corresponds to show=9500 in the visible links
-                    $estimated = (int) ($maxOffset * 3.2);
-                    Cache::put(self::TOTAL_CACHE_KEY, $estimated, self::TOTAL_CACHE_TTL);
-                    return $estimated;
-                }
-                $total = $maxOffset + 50;
+            // $lo is the last offset with a full page (50 results).
+            // Total is either lo + 50, or if $lo page was partial, lo + count.
+            // One final probe at $lo to get the exact count.
+            $finalCount = $this->countAtOffset($client, $headers, $lo);
+            $total = ($finalCount > 0) ? $lo + $finalCount : $lo;
+
+            if ($total > 0) {
                 Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
                 return $total;
             }
@@ -201,9 +236,23 @@ class AnimeListController extends Controller
             // MAL unreachable — use fallback
         }
 
-        // Ultimate fallback
         Cache::put(self::TOTAL_CACHE_KEY, self::FALLBACK_TOTAL, self::TOTAL_CACHE_TTL);
         return self::FALLBACK_TOTAL;
+    }
+
+    /**
+     * Fetch MAL browse page at the given offset and count anime rows.
+     * Returns the number of anime entries found (0 if page is empty).
+     */
+    private function countAtOffset($client, array $headers, int $offset): int
+    {
+        $response = $client->get("https://myanimelist.net/anime.php?show={$offset}", [
+            'headers' => $headers,
+            'timeout'  => 10,
+        ]);
+        $html  = (string) $response->getBody();
+        $count = substr_count($html, 'class="picSurround"');
+        return min($count, 50); // cap at page size
     }
 
     // ═══════════════════════════════════════════════════════════════════
