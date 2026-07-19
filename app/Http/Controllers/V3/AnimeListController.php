@@ -188,7 +188,11 @@ class AnimeListController extends Controller
         }
 
         // ── Build pagination ───────────────────────────────────────────
-        $total = $this->extractTotalCount($html);
+        $hasFilters = !empty($type) || !empty($status) || !empty($score)
+            || !empty($q) || !empty($producer) || !empty($genres)
+            || !empty($startDate) || !empty($endDate) || !empty($rated)
+            || !empty($letter) || !empty($orderBy);
+        $total = $this->extractTotalCount($html, $hasFilters);
         $lastPage = max(1, (int) ceil($total / $limit));
 
         $response = [
@@ -302,7 +306,7 @@ class AnimeListController extends Controller
         return $entries;
     }
 
-    private function extractTotalCount(string $html): int
+    private function extractTotalCount(string $html, bool $hasFilters = false): int
     {
         // Try to find total count text
         if (preg_match('/(\d[\d,]+)\s*titles?/i', $html, $m)) {
@@ -313,13 +317,19 @@ class AnimeListController extends Controller
         preg_match_all('/show=(\d+)/', $html, $offsets);
         if (!empty($offsets[1])) {
             $maxOffset = max(array_map('intval', $offsets[1]));
-            // Check if there's a '...' indicating more pages beyond what's shown
             $hasMore = preg_match('/>\s*\.\.\.\s*</', $html);
-            if ($hasMore) {
-                // MAL shows ~20 page links; estimate total from max visible offset
-                // Typical MAL has ~600 pages for all anime (30,000 / 50)
-                return $maxOffset + 100; // rough estimate, enough for pagination
+
+            if ($hasMore && !$hasFilters) {
+                // Unfiltered: MAL has ~30,371 anime (as of 2024).
+                // MAL only shows ~20 page links but has 600+ pages.
+                return 30371;
             }
+
+            if ($hasMore) {
+                // Filtered with more pages: estimate ~10x visible pages
+                return $maxOffset * 10 + 50;
+            }
+
             return $maxOffset + 50;
         }
 
