@@ -4,33 +4,150 @@ namespace App\Http\Controllers\V3;
 
 use Illuminate\Http\Request;
 use Jikan\Request\Anime\AnimeRequest;
+use Illuminate\Support\Facades\DB;
 
 class AnimeListController extends Controller
 {
     /**
-     * GET /anime — List all anime from MAL browse page
+     * Known total anime count on MAL.
+     * Updated periodically; used for unfiltered pagination.
+     */
+    private const TOTAL_ANIME = 30371;
+
+    /**
+     * GET /anime — List all anime
+     *
+     * Default (no filters): returns anime in ascending MAL ID order.
+     * With filters: falls back to MAL browse page scraping.
+     *
      * Supports: page, limit, type, status, min_score, q, producer, genres,
-     *            start_date, end_date, rated, order_by, sort, sfw
+     *            start_date, end_date, rated, order_by, sort, sfw, letter
      */
     public function index(Request $request)
     {
         // ── Parse & validate query parameters ──────────────────────────
-        $page     = max(1, (int) $request->get('page', 1));
-        $limit    = min(25, max(1, (int) $request->get('limit', 25)));
-        $type     = $request->get('type');
-        $status   = $request->get('status');
-        $score    = $request->get('min_score');
-        $q        = $request->get('q');
-        $sfw      = filter_var($request->get('sfw', false), FILTER_VALIDATE_BOOLEAN);
-        $orderBy  = $request->get('order_by', '');
-        $sort     = strtolower($request->get('sort', ''));
-        $producer = $request->get('producer');
-        $genres   = $request->get('genres');
-        $startDate= $request->get('start_date');
-        $endDate  = $request->get('end_date');
-        $rated    = $request->get('rated');
-        $letter   = $request->get('letter');
+        $page      = max(1, (int) $request->get('page', 1));
+        $limit     = min(25, max(1, (int) $request->get('limit', 25)));
+        $type      = $request->get('type');
+        $status    = $request->get('status');
+        $score     = $request->get('min_score');
+        $q         = $request->get('q');
+        $sfw       = filter_var($request->get('sfw', false), FILTER_VALIDATE_BOOLEAN);
+        $orderBy   = $request->get('order_by', '');
+        $sort      = strtolower($request->get('sort', ''));
+        $producer  = $request->get('producer');
+        $genres    = $request->get('genres');
+        $startDate = $request->get('start_date');
+        $endDate   = $request->get('end_date');
+        $rated     = $request->get('rated');
+        $letter    = $request->get('letter');
 
+        // Determine if any filters are active
+        $hasFilters = !empty($type) || !empty($status) || !empty($score)
+            || !empty($q) || !empty($producer) || !empty($genres)
+            || !empty($startDate) || !empty($endDate) || !empty($rated)
+            || !empty($letter) || !empty($sfw)
+            || (!empty($orderBy) && strtolower($orderBy) !== 'id');
+
+        // ── UNFILTERED: ascending MAL ID order via sequential iteration ─
+        if (!$hasFilters) {
+            // If order_by=id with sort=desc, reverse the order
+            $descending = false;
+            if (!empty($orderBy) && strtolower($orderBy) === 'id') {
+                $descending = ($sort === 'desc');
+            }
+
+            return $this->listByIdOrder($page, $limit, $descending);
+        }
+
+        // ── FILTERED: scrape MAL browse page ───────────────────────────
+        return $this->listByBrowsePage(
+            $page, $limit, $type, $status, $score, $q, $sfw,
+            $orderBy, $sort, $producer, $genres, $startDate, $endDate,
+            $rated, $letter
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  UNFILTERED: Sequential ID iteration (ascending MAL ID order)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Return anime ordered by MAL ID (ascending or descending).
+     * Uses the Jikan parser which caches in MongoDB — subsequent
+     * requests for the same page are served from cache.
+     */
+    private function listByIdOrder(int $page, int $limit, bool $descending = false)
+    {
+        $total    = self::TOTAL_ANIME;
+        $lastPage = max(1, (int) ceil($total / $limit));
+
+        // Clamp page to valid range
+        if ($page > $lastPage) {
+            return $this->buildPaginatedResponse([], $page, $lastPage, $total, $limit);
+        }
+
+        if ($descending) {
+            // Descending: highest ID first
+            // Estimate max MAL anime ID (total + ~45% gap factor)
+            $maxEstimate = (int) ($total * 1.82);
+            $startId     = $maxEstimate - (($page - 1) * $limit);
+            $direction   = -1; // count down
+        } else {
+            // Ascending: lowest ID first (DEFAULT)
+            $startId   = ($page - 1) * $limit + 1;
+            $direction = 1; // count up
+        }
+
+        $animeList = [];
+        $currentId = $startId;
+        $attempts  = 0;
+        $maxAttempts = $limit * 5; // generous buffer for ID gaps
+
+        while (count($animeList) < $limit && $attempts < $maxAttempts) {
+            $attempts++;
+            if ($currentId < 1) {
+                break;
+            }
+
+            try {
+                $anime = $this->jikan->getAnime(new AnimeRequest($currentId));
+                $raw   = json_decode($this->serializer->serialize($anime, 'json'), true);
+
+                // Validate it's actually an anime (not a redirect/error page)
+                if (!empty($raw['mal_id']) && !empty($raw['title'])) {
+                    $animeList[] = $this->transformToV4($raw);
+                }
+            } catch (\Exception $e) {
+                // Invalid or non-existent ID — skip silently
+            }
+
+            $currentId += $direction;
+        }
+
+        // Sort results by mal_id to guarantee order regardless of fetch timing
+        usort($animeList, function ($a, $b) use ($descending) {
+            return $descending
+                ? ($b['mal_id'] <=> $a['mal_id'])
+                : ($a['mal_id'] <=> $b['mal_id']);
+        });
+
+        return $this->buildPaginatedResponse($animeList, $page, $lastPage, $total, $limit);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  FILTERED: MAL browse page scraping
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Scrape MAL's anime browse page for filtered queries.
+     * MAL's browse page supports type, status, score, search, genre, etc.
+     */
+    private function listByBrowsePage(
+        $page, $limit, $type, $status, $score, $q, $sfw,
+        $orderBy, $sort, $producer, $genres, $startDate, $endDate,
+        $rated, $letter
+    ) {
         // ── Map our page/limit → MAL's show offset (50 per page) ──────
         $malPage    = (int) floor(($page - 1) * $limit / 50);
         $sliceStart = (($page - 1) * $limit) % 50;
@@ -97,13 +214,12 @@ class AnimeListController extends Controller
             $params['genre'] = (int) $genres;
         }
 
-        // SFW: exclude erotica genres (9, 12, 41 - Hentai, Erotica, etc.)
+        // SFW: exclude erotica genres
         if ($sfw) {
             $params['c[0]'] = 'a';
             $params['c[1]'] = 'b';
             $params['c[2]'] = 'c';
             $params['c[3]'] = 'd';
-            // Exclude genre 9 (Hentai), 49 (Erotica)
         }
 
         // Start date
@@ -120,8 +236,7 @@ class AnimeListController extends Controller
             $params['ed'] = (int) $m[3];
         }
 
-        // Order by → MAL's 'o' parameter
-        // 0=default, 2=title?, 3=start_date?, etc.
+        // Order by → MAL's 'o' parameter + direction 'd'
         $orderMap = [
             'title'      => 2,
             'start_date' => 3,
@@ -134,25 +249,32 @@ class AnimeListController extends Controller
             $params['o'] = $orderMap[strtolower($orderBy)];
         }
 
+        // Sort direction: asc=1, desc=0 (MAL default)
+        if ($sort === 'asc') {
+            $params['d'] = 1;
+        } elseif ($sort === 'desc') {
+            $params['d'] = 0;
+        }
+
         // ── Scrape MAL browse page ────────────────────────────────────
         $url = 'https://myanimelist.net/anime.php?' . http_build_query($params);
 
         try {
-            $client = app('GuzzleClient');
+            $client   = app('GuzzleClient');
             $response = $client->get($url, [
                 'headers' => [
-                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language' => 'en-US,en;q=0.5',
                 ]
             ]);
             $html = (string) $response->getBody();
         } catch (\Exception $e) {
             return response(json_encode([
-                'status' => 500,
-                'type' => 'Exception',
+                'status'  => 500,
+                'type'    => 'Exception',
                 'message' => 'Failed to reach MyAnimeList: ' . $e->getMessage(),
-                'error' => null,
+                'error'   => null,
             ]), 500);
         }
 
@@ -160,15 +282,7 @@ class AnimeListController extends Controller
         $animeEntries = $this->parseBrowsePage($html);
 
         if (empty($animeEntries)) {
-            return response(json_encode([
-                'pagination' => [
-                    'last_visible_page' => 1,
-                    'has_next_page' => false,
-                    'current_page' => $page,
-                    'items' => ['count' => 0, 'total' => 0, 'per_page' => $limit],
-                ],
-                'data' => [],
-            ]));
+            return $this->buildPaginatedResponse([], $page, 1, 0, $limit);
         }
 
         // ── Slice for current page ─────────────────────────────────────
@@ -179,7 +293,7 @@ class AnimeListController extends Controller
         foreach ($pageEntries as $entry) {
             try {
                 $anime = $this->jikan->getAnime(new AnimeRequest((int) $entry['mal_id']));
-                $raw = json_decode($this->serializer->serialize($anime, 'json'), true);
+                $raw   = json_decode($this->serializer->serialize($anime, 'json'), true);
                 $animeList[] = $this->transformToV4($raw);
             } catch (\Exception $e) {
                 // Full fetch failed — use browse page data as lightweight fallback
@@ -188,14 +302,28 @@ class AnimeListController extends Controller
         }
 
         // ── Build pagination ───────────────────────────────────────────
-        $hasFilters = !empty($type) || !empty($status) || !empty($score)
-            || !empty($q) || !empty($producer) || !empty($genres)
-            || !empty($startDate) || !empty($endDate) || !empty($rated)
-            || !empty($letter) || !empty($orderBy);
-        $total = $this->extractTotalCount($html, $hasFilters);
+        $total    = $this->extractTotalCount($html, true);
         $lastPage = max(1, (int) ceil($total / $limit));
 
-        $response = [
+        return $this->buildPaginatedResponse($animeList, $page, $lastPage, $total, $limit);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Response builder
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Build a v4-style paginated JSON response.
+     * per_page is always 25 (the max and default limit).
+     */
+    private function buildPaginatedResponse(
+        array $animeList,
+        int   $page,
+        int   $lastPage,
+        int   $total,
+        int   $limit
+    ) {
+        return response(json_encode([
             'pagination' => [
                 'last_visible_page' => $lastPage,
                 'has_next_page'     => $page < $lastPage,
@@ -203,23 +331,22 @@ class AnimeListController extends Controller
                 'items'             => [
                     'count'    => count($animeList),
                     'total'    => $total,
-                    'per_page' => $limit,
+                    'per_page' => 25,
                 ],
             ],
             'data' => $animeList,
-        ];
-        return response(json_encode($response));
+        ]));
     }
 
-    // ─── HTML parsing ──────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════
+    //  HTML parsing (MAL browse page)
+    // ═══════════════════════════════════════════════════════════════════
 
     private function parseBrowsePage(string $html): array
     {
         $entries = [];
-        $seen = [];
+        $seen    = [];
 
-        // Extract anime entries from table rows
-        // Each row: <tr> ... <td>image</td> <td>title+synopsis</td> <td>type</td> <td>eps</td> <td>score</td> </tr>
         preg_match_all(
             '#<tr[^>]*>\s*<td[^>]*>\s*<div class="picSurround">(.*?)</tr>#si',
             $html,
@@ -230,7 +357,6 @@ class AnimeListController extends Controller
         foreach ($rows as $row) {
             $rowHtml = $row[1];
 
-            // Extract mal_id from link
             if (!preg_match('#/anime/(\d+)/#', $rowHtml, $idMatch)) {
                 continue;
             }
@@ -240,19 +366,19 @@ class AnimeListController extends Controller
             }
             $seen[$id] = true;
 
-            // Title from <strong> tag
+            // Title
             $title = '';
             if (preg_match('#<strong>([^<]+)</strong>#', $rowHtml, $tMatch)) {
                 $title = html_entity_decode($tMatch[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
             }
 
-            // Image URL (remove /r/50x70/ sizing prefix and query string)
+            // Image URL
             $imageUrl = '';
             if (preg_match('#data-src="([^"]*)"#', $rowHtml, $imgMatch)) {
                 $imageUrl = $imgMatch[1];
             }
 
-            // Type (TV, Movie, OVA, etc.)
+            // Type
             $type = null;
             if (preg_match('#<td[^>]*>\s*(TV|OVA|Movie|Special|ONA|Music|CM|PV|TV Special)\s*</td>#si', $rowHtml, $typeMatch)) {
                 $type = trim($typeMatch[1]);
@@ -261,7 +387,7 @@ class AnimeListController extends Controller
             // Episodes
             $episodes = null;
             if (preg_match('#<td[^>]*width="40"[^>]*>\s*([\d?]+|N/A)\s*</td>#si', $rowHtml, $epsMatch)) {
-                $epVal = trim($epsMatch[1]);
+                $epVal   = trim($epsMatch[1]);
                 $episodes = ($epVal === 'N/A' || $epVal === '?') ? null : (int) $epVal;
             }
 
@@ -269,16 +395,16 @@ class AnimeListController extends Controller
             $score = null;
             if (preg_match('#<td[^>]*width="50"[^>]*>\s*([\d.]+|N/A)\s*</td>#si', $rowHtml, $scoreMatch)) {
                 $scoreVal = trim($scoreMatch[1]);
-                $score = ($scoreVal === 'N/A') ? null : (float) $scoreVal;
+                $score    = ($scoreVal === 'N/A') ? null : (float) $scoreVal;
             }
 
-            // Synopsis (from .pt4 div, strip HTML tags)
+            // Synopsis
             $synopsis = null;
             if (preg_match('#class="pt4">(.*?)</div>#si', $rowHtml, $synMatch)) {
-                $synRaw = preg_replace('#<[^>]+>#', ' ', $synMatch[1]);
-                $synRaw = preg_replace('#\s+#', ' ', $synRaw);
-                $synRaw = html_entity_decode($synRaw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                $synRaw = preg_replace('#\s*read more\.\s*$#i', '', $synRaw);
+                $synRaw  = preg_replace('#<[^>]+>#', ' ', $synMatch[1]);
+                $synRaw  = preg_replace('#\s+#', ' ', $synRaw);
+                $synRaw  = html_entity_decode($synRaw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $synRaw  = preg_replace('#\s*read more\.\s*$#i', '', $synRaw);
                 $synopsis = trim($synRaw);
                 if ($synopsis === '') {
                     $synopsis = null;
@@ -292,14 +418,14 @@ class AnimeListController extends Controller
             }
 
             $entries[] = [
-                'mal_id'   => $id,
-                'title'    => $title,
-                'image_url'=> $imageUrl,
-                'type'     => $type,
-                'episodes' => $episodes,
-                'score'    => $score,
-                'synopsis' => $synopsis,
-                'members'  => $members,
+                'mal_id'    => $id,
+                'title'     => $title,
+                'image_url' => $imageUrl,
+                'type'      => $type,
+                'episodes'  => $episodes,
+                'score'     => $score,
+                'synopsis'  => $synopsis,
+                'members'   => $members,
             ];
         }
 
@@ -308,27 +434,17 @@ class AnimeListController extends Controller
 
     private function extractTotalCount(string $html, bool $hasFilters = false): int
     {
-        // Try to find total count text
         if (preg_match('/(\d[\d,]+)\s*titles?/i', $html, $m)) {
             return (int) str_replace(',', '', $m[1]);
         }
 
-        // Calculate from pagination links: find max 'show=N' offset
         preg_match_all('/show=(\d+)/', $html, $offsets);
         if (!empty($offsets[1])) {
             $maxOffset = max(array_map('intval', $offsets[1]));
-            $hasMore = preg_match('/>\s*\.\.\.\s*</', $html);
+            $hasMore   = preg_match('/>\s*\.\.\.\s*</', $html);
 
             if ($hasMore && !$hasFilters) {
-                // Unfiltered: MAL has ~30,371 anime (as of 2024).
-                // MAL only shows ~20 page links but has 600+ pages.
-                return 30371;
-            }
-
-            if ($hasMore) {
-                // Filtered with more pages: MAL typically shows all pages for filtered
-                // results, so maxOffset + 50 is usually accurate
-                return $maxOffset + 50;
+                return self::TOTAL_ANIME;
             }
 
             return $maxOffset + 50;
@@ -337,7 +453,9 @@ class AnimeListController extends Controller
         return count($this->parseBrowsePage($html));
     }
 
-    // ─── V3 → V4 format transformation ────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════
+    //  V3 → V4 format transformation
+    // ═══════════════════════════════════════════════════════════════════
 
     private function transformToV4(array $a): array
     {
@@ -346,11 +464,11 @@ class AnimeListController extends Controller
 
         // ── Images object ──
         $imageUrl = $a['image_url'] ?? '';
-        $images = $this->buildImagesObject($imageUrl);
+        $images   = $this->buildImagesObject($imageUrl);
 
         // ── Titles array ──
         $titles = [
-            ['type' => 'Default',  'title' => $a['title'] ?? ''],
+            ['type' => 'Default', 'title' => $a['title'] ?? ''],
         ];
         if (!empty($a['title_japanese'])) {
             $titles[] = ['type' => 'Japanese', 'title' => $a['title_japanese']];
@@ -390,7 +508,7 @@ class AnimeListController extends Controller
         }
 
         // ── Build v4 item ──
-        $v4 = [
+        return [
             'mal_id'          => $a['mal_id'] ?? null,
             'url'             => $a['url'] ?? '',
             'images'          => $images,
@@ -439,8 +557,6 @@ class AnimeListController extends Controller
             'themes'          => $a['themes'] ?? [],
             'demographics'    => $a['demographics'] ?? [],
         ];
-
-        return $v4;
     }
 
     /**
@@ -495,7 +611,9 @@ class AnimeListController extends Controller
         ];
     }
 
-    // ─── Helper methods ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════
+    //  Helper methods
+    // ═══════════════════════════════════════════════════════════════════
 
     private function buildImagesObject(string $url): array
     {
