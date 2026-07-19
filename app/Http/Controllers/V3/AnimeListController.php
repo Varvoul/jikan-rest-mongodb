@@ -314,7 +314,7 @@ class AnimeListController extends Controller
 
     /**
      * Build a v4-style paginated JSON response.
-     * per_page is always 25 (the max and default limit).
+     * per_page always reflects $limit (default 25, max 25).
      */
     private function buildPaginatedResponse(
         array $animeList,
@@ -331,7 +331,7 @@ class AnimeListController extends Controller
                 'items'             => [
                     'count'    => count($animeList),
                     'total'    => $total,
-                    'per_page' => 25,
+                    'per_page' => $limit,
                 ],
             ],
             'data' => $animeList,
