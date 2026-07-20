@@ -70,6 +70,150 @@ class MetaController extends Controller
         }
     }
 
+    /**
+     * Clear ONLY seasonal/schedule cache entries
+     * This allows refreshing currently airing & upcoming anime data
+     * without clearing the entire cache
+     */
+    public function clearSeasonalCache()
+    {
+        try {
+            $prefix = env('CACHE_PREFIX', 'jikan');
+            $uri = env('MONGODB_URI');
+            $database = env('MONGODB_DATABASE', 'jikan');
+            $client = new Client($uri);
+            $db = $client->selectDatabase($database);
+            $collection = $db->selectCollection(env('MONGODB_CACHE_COLLECTION', 'cache'));
+
+            // Patterns for seasonal/schedule related cache keys
+            $patterns = [
+                // Season endpoints
+                'season$',                    // /season (current)
+                'season/later$',              // /season/later (upcoming)
+                'season/20[0-9]{2}/',        // /season/YYYY/SEASON
+                'season/archive$',           // /season/archive
+                // Schedule endpoint
+                'schedule$',                  // /schedule
+                'schedule/[a-z]+$',          // /schedule/{day}
+            ];
+
+            $totalDeleted = 0;
+            $details = [];
+
+            foreach ($patterns as $pattern) {
+                $regex = '^' . preg_quote($prefix . 'request:', '/') . '.*' . $pattern;
+                $result = $collection->deleteMany(['key' => ['$regex' => $regex]]);
+                $count = $result->getDeletedCount();
+                $totalDeleted += $count;
+                if ($count > 0) {
+                    $details[] = "{$pattern}: {$count} entries";
+                }
+            }
+
+            // Also clear TTL entries for seasonal data
+            foreach ($patterns as $pattern) {
+                $regex = '^' . preg_quote($prefix . 'ttl:', '/') . '.*' . $pattern;
+                $result = $collection->deleteMany(['key' => ['$regex' => $regex]]);
+                $totalDeleted += $result->getDeletedCount();
+            }
+
+            return response()->json([
+                'status' => 'ok',
+                'message' => 'Seasonal & schedule cache cleared successfully. Next request to /v4/season, /v4/season/later, or /v4/schedule will fetch fresh data from MAL.',
+                'deleted_entries' => $totalDeleted,
+                'cleared_patterns' => [
+                    '/v4/season (currently airing)',
+                    '/v4/season/later (upcoming)', 
+                    '/v4/season/{year}/{season} (specific season)',
+                    '/v4/season/archive',
+                    '/v4/schedule (weekly schedule)',
+                    '/v4/schedule/{day} (daily schedule)'
+                ],
+                'details' => $details,
+                'timestamp' => date('c'),
+                'next_step' => 'Call GET /v4/season or GET /v4/season/later to fetch fresh data'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get seasonal cache status - check if seasonal data is cached and how old it is
+     */
+    public function seasonalCacheStatus()
+    {
+        try {
+            $prefix = env('CACHE_PREFIX', 'jikan');
+            $uri = env('MONGODB_URI');
+            $database = env('MONGODB_DATABASE', 'jikan');
+            $client = new Client($uri);
+            $db = $client->selectDatabase($database);
+            $collection = $db->selectCollection(env('MONGODB_CACHE_COLLECTION', 'cache'));
+
+            $endpoints = [
+                'current_season' => ['pattern' => 'season$', 'name' => 'Currently Airing (/v4/season)'],
+                'upcoming' => ['pattern' => 'season/later$', 'name' => 'Upcoming (/v4/season/later)'],
+                'schedule' => ['pattern' => 'schedule$', 'name' => 'Weekly Schedule (/v4/schedule)'],
+                'archive' => ['pattern' => 'season/archive$', 'name' => 'Season Archive (/v4/season/archive)'],
+            ];
+
+            $status = [];
+
+            foreach ($endpoints as $key => $endpoint) {
+                $regex = '^' . preg_quote($prefix . 'request:', '/') . '.*' . $endpoint['pattern'];
+                $cursor = $collection->find(
+                    ['key' => ['$regex' => $regex]],
+                    ['limit' => 1, 'sort' => ['_id' => -1]]
+                );
+
+                $doc = iterator_to_array($cursor)[0] ?? null;
+
+                if ($doc && isset($doc['expires_at'])) {
+                    $expiresAt = $doc['expires_at'] instanceof \MongoDB\BSON\UTCDateTime 
+                        ? $doc['expires_at']->toDateTime()->format('U')
+                        : strtotime((string) $doc['expires_at']);
+                    $now = time();
+                    $ageSeconds = $now - (isset($doc['created_at']) ? (
+                        $doc['created_at'] instanceof \MongoDB\BSON\UTCDateTime 
+                            ? $doc['created_at']->toDateTime()->format('U')
+                            : strtotime((string) $doc['created_at'])
+                    ) : $now);
+                    $ttlRemaining = max(0, $expiresAt - $now);
+
+                    $status[$key] = [
+                        'name' => $endpoint['name'],
+                        'cached' => true,
+                        'age_minutes' => round($ageSeconds / 60, 1),
+                        'ttl_remaining_minutes' => round($ttlRemaining / 60, 1),
+                        'expires_at' => date('Y-m-d H:i:s T', $expiresAt),
+                        'cache_key' => $doc['key'],
+                    ];
+                } else {
+                    $status[$key] = [
+                        'name' => $endpoint['name'],
+                        'cached' => false,
+                        'message' => 'Not cached yet - will fetch from MAL on next request',
+                    ];
+                }
+            }
+
+            return response()->json([
+                'status' => 'ok',
+                'seasonal_cache_status' => $status,
+                'note' => 'Use POST /meta/clear_seasonal_cache to force refresh these endpoints',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function requests($type, $period, $offset = 0)
     {
         if (!\in_array($type, [

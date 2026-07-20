@@ -44,6 +44,15 @@ $router->group(
            'uses' => 'MetaController@clearCache'
         ]);
 
+        // Seasonal cache management - dedicated endpoints for airing/upcoming data
+        $router->post('/clear_seasonal_cache', [
+           'uses' => 'MetaController@clearSeasonalCache'
+        ]);
+
+        $router->get('/seasonal_cache_status', [
+           'uses' => 'MetaController@seasonalCacheStatus'
+        ]);
+
         $router->group(
             [
                 'prefix' => 'requests'
