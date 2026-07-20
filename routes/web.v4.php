@@ -24,12 +24,20 @@ $router->group(
 $router->group(
     ['prefix' => 'top'],
     function () use ($router) {
-        $router->get('/anime', [
+        $router->get('/anime[/{page:[0-9]+}]', [
             'uses' => 'ListController@topAnime'
         ]);
 
-        $router->get('/manga', [
+        $router->get('/manga[/{page:[0-9]+}]', [
             'uses' => 'ListController@topManga'
+        ]);
+
+        $router->get('/characters[/{page:[0-9]+}]', [
+            'uses' => 'ListController@topCharacters'
+        ]);
+
+        $router->get('/people[/{page:[0-9]+}]', [
+            'uses' => 'ListController@topPeople'
         ]);
     }
 );

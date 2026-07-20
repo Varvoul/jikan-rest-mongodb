@@ -221,6 +221,62 @@ class ListController extends V3Controller
     }
 
     /**
+     * GET /v4/top/characters[/{page}]
+     */
+    public function topCharacters(Request $request)
+    {
+        $page = max(1, (int)($request->get('page', 1)));
+        $limit = $this->clampLimit((int)($request->get('limit', self::DEFAULT_LIMIT)));
+
+        try {
+            $result = $this->jikan->getTopCharacters(new \Jikan\Request\Top\TopCharactersRequest($page));
+            $wrapped = ['top' => $result];
+            $data = json_decode($this->serializer->serialize($wrapped, 'json'), true);
+        } catch (\Exception $e) {
+            return $this->errorResponse($e);
+        }
+
+        $results = $data['top'] ?? [];
+        $lastPage = $this->estimateLastPage($results, $page, 50);
+
+        // Transform to V4 format with full fields
+        $v4Data = [];
+        foreach (array_slice($results, 0, $limit) as $item) {
+            $v4Data[] = $this->transformCharacterToV4($item);
+        }
+
+        return response($this->buildV4Response($v4Data, $page, $limit, $lastPage));
+    }
+
+    /**
+     * GET /v4/top/people[/{page}]
+     */
+    public function topPeople(Request $request)
+    {
+        $page = max(1, (int)($request->get('page', 1)));
+        $limit = $this->clampLimit((int)($request->get('limit', self::DEFAULT_LIMIT)));
+
+        try {
+            $result = $this->jikan->getTopPeople(new \Jikan\Request\Top\TopPeopleRequest($page));
+            $wrapped = ['top' => $result];
+            $data = json_decode($this->serializer->serialize($wrapped, 'json'), true);
+        } catch (\Exception $e) {
+            return $this->errorResponse($e);
+        }
+
+        $results = $data['top'] ?? [];
+        $lastPage = $this->estimateLastPage($results, $page, 50);
+
+        // Transform to V4 format with full fields
+        $v4Data = [];
+        foreach (array_slice($results, 0, $limit) as $item) {
+            $v4Data[] = $this->transformPersonToV4($item);
+        }
+
+        return response($this->buildV4Response($v4Data, $page, $limit, $lastPage));
+    }
+
+    /**
      * GET /v4/recommendations/anime?page=1&limit=25&sfw=true
      */
     public function recommendationsAnime(Request $request)
@@ -380,5 +436,181 @@ class ListController extends V3Controller
             'message' => $e->getMessage(),
             'error'   => null,
         ], $code);
+    }
+
+    // =========================================================================
+    // V3 → V4 Transform Methods for Characters & People
+    // =========================================================================
+
+    /**
+     * Transform V3 top character item to V4 format with all required fields.
+     */
+    private function transformCharacterToV4(array $c): array
+    {
+        // Strip V3 metadata
+        unset($c['request_hash'], $c['request_cached'], $c['request_cache_expiry']);
+
+        // Build images object
+        $imageUrl = $c['image_url'] ?? '';
+        $images = $this->buildImagesObject($imageUrl);
+
+        // Build anime appearances (animeography -> anime)
+        $animeAppearances = [];
+        foreach ($c['animeography'] ?? [] as $anime) {
+            $animeAppearances[] = [
+                'role'   => $anime['role'] ?? '',
+                'mal_id' => $anime['mal_id'] ?? null,
+                'url'    => $anime['url'] ?? '',
+                'images' => $this->buildImagesObject($anime['image_url'] ?? ''),
+                'name'   => $anime['name'] ?? '',
+            ];
+        }
+
+        // Build manga appearances (mangaography -> manga)
+        $mangaAppearances = [];
+        foreach ($c['mangaography'] ?? [] as $manga) {
+            $mangaAppearances[] = [
+                'role'   => $manga['role'] ?? '',
+                'mal_id' => $manga['mal_id'] ?? null,
+                'url'    => $manga['url'] ?? '',
+                'images' => $this->buildImagesObject($manga['image_url'] ?? ''),
+                'name'   => $manga['name'] ?? '',
+            ];
+        }
+
+        // Build nicknames array
+        $nicknames = [];
+        if (!empty($c['nickname_japanese'])) {
+            $nicknames = is_array($c['nickname_japanese']) ? $c['nickname_japanese'] : [$c['nickname_japanese']];
+        }
+        if (empty($nicknames) && !empty($c['nicknames'])) {
+            $nicknames = is_array($c['nicknames']) ? $c['nicknames'] : [$c['nicknames']];
+        }
+
+        return [
+            'mal_id'     => $c['mal_id'] ?? null,
+            'url'        => $c['url'] ?? '',
+            'images'     => $images,
+            'name'       => $c['name'] ?? '',
+            'name_kanji' => $c['name_kanji'] ?? null,
+            'nicknames'  => $nicknames,
+            'favorites'  => isset($c['favorites']) ? (int) $c['favorites'] : null,
+            'about'      => $c['about'] ?? null,
+            'anime'      => $animeAppearances,
+            'manga'      => $mangaAppearances,
+            'voices'     => [],
+        ];
+    }
+
+    /**
+     * Transform V3 top person item to V4 format with all required fields.
+     */
+    private function transformPersonToV4(array $p): array
+    {
+        // Strip V3 metadata
+        unset($p['request_hash'], $p['request_cached'], $p['request_cache_expiry']);
+
+        // Build images object
+        $imageUrl = $p['image_url'] ?? '';
+        $images = $this->buildImagesObject($imageUrl);
+
+        // Build alternative names
+        $alternativeNames = [];
+        if (!empty($p['family_name']) || !empty($p['given_name'])) {
+            if (!empty($p['family_name']) && !empty($p['given_name'])) {
+                $alternativeNames[] = $p['family_name'] . ' ' . $p['given_name'];
+            }
+            if (!empty($p['family_name'])) {
+                $alternativeNames[] = $p['family_name'];
+            }
+            if (!empty($p['given_name'])) {
+                $alternativeNames[] = $p['given_name'];
+            }
+        }
+        foreach ($p['alternate_name'] ?? [] as $altName) {
+            if (!in_array($altName, $alternativeNames)) {
+                $alternativeNames[] = $altName;
+            }
+        }
+
+        // Build anime staff positions
+        $animeStaffPositions = [];
+        foreach ($p['anime_staff_positions'] ?? [] as $position) {
+            $animeStaffPositions[] = [
+                'position' => $position['staff'] ?? $position['position'] ?? '',
+                'mal_id'   => $position['mal_id'] ?? null,
+                'url'      => $position['url'] ?? '',
+                'images'   => $this->buildImagesObject($position['image_url'] ?? ''),
+                'name'     => $position['name'] ?? '',
+            ];
+        }
+
+        // Build voice acting roles
+        $voiceActingRoles = [];
+        foreach ($p['voice_acting_roles'] ?? [] as $role) {
+            $voiceActingRoles[] = [
+                'role'   => $role['role'] ?? '',
+                'mal_id' => $role['mal_id'] ?? null,
+                'url'    => $role['url'] ?? '',
+                'images' => $this->buildImagesObject($role['image_url'] ?? ''),
+                'name'   => $role['name'] ?? '',
+            ];
+        }
+
+        return [
+            'mal_id'                => $p['mal_id'] ?? null,
+            'url'                   => $p['url'] ?? '',
+            'images'                => $images,
+            'given_name'            => $p['given_name'] ?? null,
+            'family_name'           => $p['family_name'] ?? null,
+            'alternative_names'     => $alternativeNames ?: ($p['alternate_name'] ?? []),
+            'birthday'              => $p['birthday'] ?? null,
+            'favorites'             => isset($p['favorites']) ? (int) $p['favorites'] : null,
+            'about'                 => $p['about'] ?? null,
+            'data'                  => [
+                'about'               => $p['about'] ?? null,
+                'alternate_names'     => $alternativeNames ?: ($p['alternate_name'] ?? []),
+                'voice_acting_roles'  => $voiceActingRoles,
+                'anime_staff_positions' => $animeStaffPositions,
+                'author_positions'    => [],
+            ],
+            'anime_staff_positions' => $animeStaffPositions,
+            'voice_acting_roles'    => $voiceActingRoles,
+            'author_positions'      => [],
+        ];
+    }
+
+    /**
+     * Build V4-style images object from image URL.
+     */
+    private function buildImagesObject(string $url): array
+    {
+        if (empty($url)) {
+            return [
+                'jpg'  => ['image_url' => null, 'small_image_url' => null, 'large_image_url' => null],
+                'webp' => ['image_url' => null, 'small_image_url' => null, 'large_image_url' => null],
+            ];
+        }
+
+        // Remove any query strings and sizing prefixes
+        $baseUrl = preg_replace('#/r/\d+x\d+/#', '/', $url);
+        $baseUrl = preg_replace('#\?.*$#', '', $baseUrl);
+
+        // Build jpg variants
+        $jpgBase = preg_replace('#\.(webp|jpg|jpeg|png|gif)$#i', '', $baseUrl);
+        $jpg = [
+            'image_url'        => $jpgBase . '.jpg',
+            'small_image_url'  => $jpgBase . 't.jpg',
+            'large_image_url'  => $jpgBase . 'l.jpg',
+        ];
+
+        // Build webp variants
+        $webp = [
+            'image_url'        => $jpgBase . '.webp',
+            'small_image_url'  => $jpgBase . 't.webp',
+            'large_image_url'  => $jpgBase . 'l.webp',
+        ];
+
+        return ['jpg' => $jpg, 'webp' => $webp];
     }
 }
