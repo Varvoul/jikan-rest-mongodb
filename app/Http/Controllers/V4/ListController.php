@@ -491,7 +491,7 @@ class ListController extends V3Controller
             'mal_id'     => $c['mal_id'] ?? null,
             'url'        => $c['url'] ?? '',
             'images'     => $images,
-            'name'       => $c['name'] ?? '',
+            'name'       => $c['title'] ?? $c['name'] ?? '',
             'name_kanji' => $c['name_kanji'] ?? null,
             'nicknames'  => $nicknames,
             'favorites'  => isset($c['favorites']) ? (int) $c['favorites'] : null,
