@@ -214,6 +214,44 @@ class MetaController extends Controller
         }
     }
 
+    /**
+     * POST /meta/clear_anime_total_cache
+     *
+     * Clears the cached anime total count, forcing recalculation
+     * on next /v4/anime request. This is useful after updating
+     * the ESTIMATED_MAX_MAL_ID or when MAL adds many new anime.
+     */
+    public function clearAnimeTotalCache()
+    {
+        try {
+            // Clear from Laravel Cache (uses MongoDB)
+            Cache::forget('anime_list_total_count');
+
+            // Also try to clear from MongoDB directly for safety
+            $uri = env('MONGODB_URI');
+            $database = env('MONGODB_DATABASE', 'jikan');
+            $client = new Client($uri);
+            $db = $client->selectDatabase($database);
+            $cacheCollection = $db->selectCollection(env('MONGODB_CACHE_COLLECTION', 'cache'));
+
+            $cacheKey = env('CACHE_PREFIX', 'jikan') . ':cache:anime_list_total_count';
+            $result = $cacheCollection->deleteOne(['key' => $cacheKey]);
+
+            return response()->json([
+                'status' => 'ok',
+                'message' => 'Anime total cache cleared successfully. Next /v4/anime request will recalculate the total.',
+                'deleted_from_mongo' => $result->getDeletedCount(),
+                'note' => 'New total will be estimated by checking recent MAL anime IDs (up to 65,000+)',
+                'timestamp' => date('c'),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function requests($type, $period, $offset = 0)
     {
         if (!\in_array($type, [

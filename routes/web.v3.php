@@ -53,6 +53,11 @@ $router->group(
            'uses' => 'MetaController@seasonalCacheStatus'
         ]);
 
+        // Anime total cache management - for when MAL adds new anime
+        $router->post('/clear_anime_total_cache', [
+           'uses' => 'MetaController@clearAnimeTotalCache'
+        ]);
+
         $router->group(
             [
                 'prefix' => 'requests'
