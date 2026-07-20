@@ -215,13 +215,26 @@ class AnimeListController extends Controller
      */
     private function countAtOffset($client, array $headers, int $offset): int
     {
-        $response = $client->get("https://myanimelist.net/anime.php?show={$offset}", [
-            'headers' => $headers,
-            'timeout'  => 10,
-        ]);
-        $html  = (string) $response->getBody();
-        $count = substr_count($html, 'class="picSurround"');
-        return min($count, 50);
+        try {
+            $response = $client->get("https://myanimelist.net/anime.php?show={$offset}", [
+                'headers' => array_merge($headers, [
+                    'Referer' => 'https://myanimelist.net/',
+                ]),
+                'timeout'  => 10,
+            ]);
+            
+            // Check for 405 or other errors
+            $statusCode = $response->getStatusCode();
+            if ($statusCode === 405 || $statusCode >= 400) {
+                return 0; // Return 0 to trigger fallback behavior
+            }
+            
+            $html  = (string) $response->getBody();
+            $count = substr_count($html, 'class="picSurround"');
+            return min($count, 50);
+        } catch (\Exception $e) {
+            return 0; // Error - will use fallback total
+        }
     }
 
 
@@ -357,10 +370,44 @@ class AnimeListController extends Controller
                     'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language' => 'en-US,en;q=0.5',
+                    'Referer'         => 'https://myanimelist.net/',
                 ]
             ]);
+            
+            $statusCode = $response->getStatusCode();
+            
+            // Handle 405 Method Not Allowed - MAL blocking browse page access
+            if ($statusCode === 405) {
+                return $this->handleMalBlocked($status, $type, $score, $q, $page, $limit, $orderBy, $sort);
+            }
+            
+            // Handle other error status codes
+            if ($statusCode >= 400) {
+                return $this->handleMalBlocked($status, $type, $score, $q, $page, $limit, $orderBy, $sort);
+            }
+            
             $html = (string) $response->getBody();
+            
+        } catch (\GuzzleHttp\Exception\ClientException $e) {
+            $statusCode = $e->getResponse() ? $e->getResponse()->getStatusCode() : 500;
+            
+            // 405 or other client errors - use fallback
+            if ($statusCode === 405 || $statusCode === 429) {
+                return $this->handleMalBlocked($status, $type, $score, $q, $page, $limit, $orderBy, $sort);
+            }
+            
+            return response(json_encode([
+                'status'  => 500,
+                'type'    => 'Exception',
+                'message' => 'Failed to reach MyAnimeList: ' . $e->getMessage(),
+                'error'   => null,
+            ]), 500);
         } catch (\Exception $e) {
+            // Network errors or timeouts - use fallback for status filters
+            if (!empty($status)) {
+                return $this->handleMalBlocked($status, $type, $score, $q, $page, $limit, $orderBy, $sort);
+            }
+            
             return response(json_encode([
                 'status'  => 500,
                 'type'    => 'Exception',
@@ -397,6 +444,382 @@ class AnimeListController extends Controller
         $lastPage = max(1, (int) ceil($total / $limit));
 
         return $this->buildPaginatedResponse($animeList, $page, $lastPage, $total, $limit);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  FALLBACK: When MAL browse page is blocked (405/rate-limit)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Handle cases where MAL blocks browse page access.
+     * Uses intelligent fallbacks based on the requested filter.
+     */
+    private function handleMalBlocked(
+        ?string $status, ?string $type, ?string $score, ?string $q,
+        int $page, int $limit, string $orderBy, string $sort
+    ) {
+        // ── Strategy 1: Status filters → Use Season endpoints or ID iteration ──
+        if (!empty($status)) {
+            $statusLower = strtolower($status);
+            
+            if (in_array($statusLower, ['airing', 'currently_airing', '1'])) {
+                return $this->getAiringAnimeFallback($page, $limit, $orderBy, $sort);
+            }
+            
+            if (in_array($statusLower, ['upcoming', 'not_yet_aired', '3'])) {
+                return $this->getUpcomingAnimeFallback($page, $limit, $orderBy, $sort);
+            }
+            
+            if (in_array($statusLower, ['completed', 'finished_airing', '2'])) {
+                return $this->getStatusFilteredFallback('Finished Airing', $page, $limit, $orderBy, $sort);
+            }
+            
+            // Generic status filter - use iteration with filtering
+            return $this->getStatusFilteredFallback(ucfirst(str_replace('_', ' ', $status)), $page, $limit, $orderBy, $sort);
+        }
+        
+        // ── Strategy 2: Type filter → Use ID iteration with type check ─────
+        if (!empty($type)) {
+            return $this->getTypeFilteredFallback($type, $page, $limit, $orderBy, $sort);
+        }
+        
+        // ── Strategy 3: Score filter → Use ID iteration with score check ────
+        if ($score !== null) {
+            return $this->getScoreFilteredFallback((float)$score, $page, $limit, $orderBy, $sort);
+        }
+        
+        // ── Strategy 4: Search query → Use ID iteration with title match ───
+        if (!empty($q)) {
+            return $this->getSearchFallback($q, $page, $limit);
+        }
+        
+        // ── Fallback: Return unfiltered list with note about limitations ────
+        return $this->listByIdOrder($page, $limit, ($sort === 'desc'));
+    }
+
+    /**
+     * Get currently airing anime using season endpoint as primary source,
+     * falling back to sequential ID iteration with status check.
+     */
+    private function getAiringAnimeFallback(int $page, int $limit, string $orderBy, string $sort)
+    {
+        try {
+            // Try to use Jikan's seasonal parser first (current season)
+            $seasonData = $this->jikan->getSeasonal(new \Jikan\Request\Seasonal\SeasonalRequest(null, null));
+            $seasonJson = json_decode($this->serializer->serialize($seasonData, 'json'), true);
+            
+            $animeList = [];
+            if (!empty($seasonJson['anime'])) {
+                foreach ($seasonJson['anime'] as $anime) {
+                    try {
+                        // Fetch full data for each seasonal anime
+                        $fullAnime = $this->jikan->getAnime(new AnimeRequest((int)$anime['mal_id']));
+                        $raw = json_decode($this->serializer->serialize($fullAnime, 'json'), true);
+                        
+                        // Only include actually airing anime
+                        if (!empty($raw['airing']) && $raw['airing'] === true) {
+                            $animeList[] = $this->transformToV4($raw);
+                        }
+                    } catch (\Exception $e) {
+                        // Use lightweight seasonal data as fallback
+                        $animeList[] = $this->seasonalEntryToV4($anime);
+                    }
+                }
+            }
+            
+            // Sort results
+            $animeList = $this->sortAnimeList($animeList, $orderBy, $sort);
+            
+            // Paginate
+            $total = count($animeList);
+            $lastPage = max(1, (int)ceil($total / $limit));
+            $offset = ($page - 1) * $limit;
+            $paged = array_slice($animeList, $offset, $limit);
+            
+            return $this->buildPaginatedResponse($paged, $page, $lastPage, $total, $limit);
+            
+        } catch (\Exception $e) {
+            // Season endpoint failed - fall back to ID iteration
+            return $this->getStatusFilteredFallback('Currently Airing', $page, $limit, $orderBy, $sort);
+        }
+    }
+
+    /**
+     * Get upcoming anime using season/later endpoint
+     */
+    private function getUpcomingAnimeFallback(int $page, int $limit, string $orderBy, string $sort)
+    {
+        try {
+            $seasonData = $this->jikan->getSeasonal(new \Jikan\Request\Seasonal\SeasonalRequest(null, null, true));
+            $seasonJson = json_decode($this->serializer->serialize($seasonData, 'json'), true);
+            
+            $animeList = [];
+            if (!empty($seasonJson['anime'])) {
+                foreach ($seasonJson['anime'] as $anime) {
+                    $animeList[] = $this->seasonalEntryToV4($anime);
+                }
+            }
+            
+            $animeList = $this->sortAnimeList($animeList, $orderBy, $sort);
+            
+            $total = count($animeList);
+            $lastPage = max(1, (int)ceil($total / $limit));
+            $offset = ($page - 1) * $limit;
+            $paged = array_slice($animeList, $offset, $limit);
+            
+            return $this->buildPaginatedResponse($paged, $page, $lastPage, $total, $limit);
+            
+        } catch (\Exception $e) {
+            return $this->getStatusFilteredFallback('Not yet aired', $page, $limit, $orderBy, $sort);
+        }
+    }
+
+    /**
+     * Fallback: Iterate through anime IDs and filter by status field.
+     * Scans recent anime (higher IDs more likely to be airing/upcoming).
+     */
+    private function getStatusFilteredFallback(string $targetStatus, int $page, int $limit, string $orderBy, string $sort)
+    {
+        $animeList = [];
+        $currentId = 60000; // Start from recent anime IDs
+        $found = 0;
+        $maxScan = 500; // Limit scan range for performance
+        
+        while ($found < ($page * $limit + 50) && $currentId > 60000 - $maxScan) {
+            try {
+                $anime = $this->jikan->getAnime(new AnimeRequest($currentId));
+                $raw = json_decode($this->serializer->serialize($anime, 'json'), true);
+                
+                if (!empty($raw['mal_id']) && !empty($raw['title'])) {
+                    $animeStatus = $raw['status'] ?? '';
+                    
+                    // Match status flexibly
+                    $isMatch = false;
+                    if (stripos($targetStatus, 'airing') !== false && 
+                        (stripos($animeStatus, 'airing') !== false || ($raw['airing'] === true))) {
+                        $isMatch = true;
+                    } elseif (stripos($targetStatus, 'not yet') !== false && 
+                             stripos($animeStatus, 'upcoming') !== false) {
+                        $isMatch = true;
+                    } elseif (stripos($targetStatus, 'finished') !== false || stripos($targetStatus, 'complete') !== false) {
+                        if (stripos($animeStatus, 'finish') !== false || $raw['airing'] === false) {
+                            $isMatch = true;
+                        }
+                    }
+                    
+                    if ($isMatch) {
+                        $animeList[] = $this->transformToV4($raw);
+                        $found++;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Skip invalid IDs
+            }
+            
+            $currentId--;
+        }
+        
+        // Sort and paginate
+        $animeList = $this->sortAnimeList($animeList, $orderBy, $sort);
+        $total = count($animeList);
+        $lastPage = max(1, (int)ceil($total / $limit));
+        $offset = ($page - 1) * $limit;
+        $paged = array_slice($animeList, $offset, $limit);
+        
+        return $this->buildPaginatedResponse($paged, $page, $lastPage, $total, $limit);
+    }
+
+    /**
+     * Fallback: Filter by anime type
+     */
+    private function getTypeFilteredFallback(string $type, int $page, int $limit, string $orderBy, string $sort)
+    {
+        $animeList = [];
+        $currentId = 58000; // Start from reasonable range
+        $found = 0;
+        $maxScan = 3000;
+        $typeUpper = strtoupper($type);
+        
+        while ($found < ($page * $limit + 25) && $currentId > $currentId - $maxScan) {
+            try {
+                $anime = $this->jikan->getAnime(new AnimeRequest($currentId));
+                $raw = json_decode($this->serializer->serialize($anime, 'json'), true);
+                
+                if (!empty($raw['mal_id']) && !empty($raw['title'])) {
+                    $animeType = $raw['type'] ?? '';
+                    if (strtoupper($animeType) === $typeUpper) {
+                        $animeList[] = $this->transformToV4($raw);
+                        $found++;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Skip
+            }
+            
+            $currentId--;
+        }
+        
+        $animeList = $this->sortAnimeList($animeList, $orderBy, $sort);
+        $total = count($animeList);
+        $lastPage = max(1, (int)ceil($total / $limit));
+        $offset = ($page - 1) * $limit;
+        $paged = array_slice($animeList, $offset, $limit);
+        
+        return $this->buildPaginatedResponse($paged, $page, $lastPage, $total, $limit);
+    }
+
+    /**
+     * Fallback: Filter by minimum score
+     */
+    private function getScoreFilteredFallback(float $minScore, int $page, int $limit, string $orderBy, string $sort)
+    {
+        $animeList = [];
+        $currentId = 58000;
+        $found = 0;
+        $maxScan = 3000;
+        
+        while ($found < ($page * $limit + 25) && $currentId > $currentId - $maxScan) {
+            try {
+                $anime = $this->jikan->getAnime(new AnimeRequest($currentId));
+                $raw = json_decode($this->serializer->serialize($anime, 'json'), true);
+                
+                if (!empty($raw['mal_id']) && !empty($raw['title'])) {
+                    $score = (float)($raw['score'] ?? 0);
+                    if ($score >= $minScore) {
+                        $animeList[] = $this->transformToV4($raw);
+                        $found++;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Skip
+            }
+            
+            $currentId--;
+        }
+        
+        $animeList = $this->sortAnimeList($animeList, $orderBy, $sort);
+        $total = count($animeList);
+        $lastPage = max(1, (int)ceil($total / $limit));
+        $offset = ($page - 1) * $limit;
+        $paged = array_slice($animeList, $offset, $limit);
+        
+        return $this->buildPaginatedResponse($paged, $page, $lastPage, $total, $limit);
+    }
+
+    /**
+     * Fallback: Search by title (basic implementation)
+     */
+    private function getSearchFallback(string $query, int $page, int $limit)
+    {
+        $animeList = [];
+        $currentId = 58000;
+        $found = 0;
+        $maxScan = 2000;
+        $queryLower = strtolower($query);
+        
+        while ($found < ($page * $limit + 25) && $currentId > $currentId - $maxScan) {
+            try {
+                $anime = $this->jikan->getAnime(new AnimeRequest($currentId));
+                $raw = json_decode($this->serializer->serialize($anime, 'json'), true);
+                
+                if (!empty($raw['mal_id']) && !empty($raw['title'])) {
+                    $title = strtolower($raw['title']);
+                    if (strpos($title, $queryLower) !== false) {
+                        $animeList[] = $this->transformToV4($raw);
+                        $found++;
+                    }
+                }
+            } catch (\Exception $e) {
+                // Skip
+            }
+            
+            $currentId--;
+        }
+        
+        $total = count($animeList);
+        $lastPage = max(1, (int)ceil($total / $limit));
+        $offset = ($page - 1) * $limit;
+        $paged = array_slice($animeList, $offset, $limit);
+        
+        return $this->buildPaginatedResponse($paged, $page, $lastPage, $total, $limit);
+    }
+
+    /**
+     * Convert seasonal anime entry to V4 format (lightweight)
+     */
+    private function seasonalEntryToV4(array $entry): array
+    {
+        return [
+            'mal_id' => $entry['mal_id'] ?? null,
+            'url' => $entry['url'] ?? null,
+            'images' => [
+                'jpg' => [
+                    'image_url' => $entry['image_url'] ?? null,
+                    'small_image_url' => null,
+                    'large_image_url' => null,
+                ],
+                'webp' => [
+                    'image_url' => str_replace('.jpg', '.webp', $entry['image_url'] ?? ''),
+                    'small_image_url' => null,
+                    'large_image_url' => null,
+                ],
+            ],
+            'title' => $entry['title'] ?? null,
+            'titles' => [
+                ['type' => 'Default', 'title' => $entry['title'] ?? null],
+            ],
+            'type' => $entry['type'] ?? null,
+            'episodes' => $entry['episodes'] ?? null,
+            'status' => isset($entry['airing_start']) ? 'Currently Airing' : 'Upcoming',
+            'airing' => isset($entry['airing_start']),
+            'aired' => [
+                'from' => $entry['airing_start'] ?? null,
+                'to' => null,
+                'prop' => [
+                    'from' => null,
+                    'to' => null,
+                ],
+                'string' => $entry['airing_start'] ?? '',
+            ],
+            'score' => $entry['score'] ?? null,
+            'scored_by' => $entry['members'] ?? null,
+            'members' => $entry['members'] ?? null,
+            'synopsis' => $entry['synopsis'] ?? null,
+            'genres' => $entry['genres'] ?? [],
+            'themes' => $entry['themes'] ?? [],
+            'demographics' => $entry['demographics'] ?? [],
+            'producers' => $entry['producers'] ?? [],
+            'licensors' => $entry['licensors'] ?? [],
+            'studios' => [],
+            'r18' => $entry['r18'] ?? false,
+            'kids' => $entry['kids'] ?? false,
+        ];
+    }
+
+    /**
+     * Sort anime list by specified field and direction
+     */
+    private function sortAnimeList(array $animeList, string $orderBy, string $sort): array
+    {
+        if (empty($orderBy)) {
+            return $animeList;
+        }
+        
+        $descending = (strtolower($sort) === 'desc');
+        
+        usort($animeList, function ($a, $b) use ($orderBy, $descending) {
+            $valA = $a[$orderBy] ?? 0;
+            $valB = $b[$orderBy] ?? 0;
+            
+            // Handle null values
+            if ($valA === null) $valA = 0;
+            if ($valB === null) $valB = 0;
+            
+            $cmp = $valA <=> $valB;
+            return $descending ? -$cmp : $cmp;
+        });
+        
+        return $animeList;
     }
 
     // ═══════════════════════════════════════════════════════════════════
