@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\V3;
 
+use Illuminate\Http\Request;
 use Jikan\Request\Seasonal\SeasonalRequest;
 use Jikan\Request\SeasonList\SeasonListRequest;
 use Jikan\Request\Anime\AnimeRequest;
@@ -21,7 +22,7 @@ class SeasonController extends Controller
     private const DEFAULT_LIMIT = 25;
     private const MAX_LIMIT = 100;
 
-    public function main(?int $year = null, ?string $season = null)
+    public function main(Request $request, ?int $year = null, ?string $season = null)
     {
         if (!is_null($season) && !\in_array(strtolower($season), self::VALID_SEASONS)) {
             return response()->json([
@@ -31,8 +32,8 @@ class SeasonController extends Controller
         }
 
         // Parse pagination parameters
-        $page = max(1, (int) request()->get('page', 1));
-        $limit = min(self::MAX_LIMIT, max(1, (int) request()->get('limit', self::DEFAULT_LIMIT)));
+        $page = max(1, (int) $request->get('page', 1));
+        $limit = min(self::MAX_LIMIT, max(1, (int) $request->get('limit', self::DEFAULT_LIMIT)));
 
         try {
             $seasonData = $this->jikan->getSeasonal(new SeasonalRequest($year, $season));
@@ -141,11 +142,11 @@ class SeasonController extends Controller
         }
     }
 
-    public function later()
+    public function later(Request $request)
     {
         // Parse pagination parameters
-        $page = max(1, (int) request()->get('page', 1));
-        $limit = min(self::MAX_LIMIT, max(1, (int) request()->get('limit', self::DEFAULT_LIMIT)));
+        $page = max(1, (int) $request->get('page', 1));
+        $limit = min(self::MAX_LIMIT, max(1, (int) $request->get('limit', self::DEFAULT_LIMIT)));
 
         try {
             $seasonData = $this->jikan->getSeasonal(new SeasonalRequest(null, null, true));

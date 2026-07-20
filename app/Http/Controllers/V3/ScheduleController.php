@@ -25,7 +25,7 @@ class ScheduleController extends Controller
     private const DEFAULT_LIMIT = 25;
     private const MAX_LIMIT = 100;
 
-    public function main(?string $day = null)
+    public function main(Request $request, ?string $day = null)
     {
         if (null !== $day && !\in_array(strtolower($day), self::VALID_DAYS, true)) {
             return response()->json([
@@ -35,8 +35,8 @@ class ScheduleController extends Controller
         }
 
         // Parse pagination parameters
-        $page = max(1, (int) request()->get('page', 1));
-        $limit = min(self::MAX_LIMIT, max(1, (int) request()->get('limit', self::DEFAULT_LIMIT)));
+        $page = max(1, (int) $request->get('page', 1));
+        $limit = min(self::MAX_LIMIT, max(1, (int) $request->get('limit', self::DEFAULT_LIMIT)));
 
         try {
             $scheduleData = $this->jikan->getSchedule(new ScheduleRequest());
