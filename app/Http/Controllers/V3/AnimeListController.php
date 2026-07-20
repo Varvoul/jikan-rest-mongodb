@@ -10,9 +10,17 @@ class AnimeListController extends Controller
 {
     /**
      * Fallback total if MAL is unreachable.
-     * The real total is fetched dynamically and cached.
+     * MAL anime IDs currently go up to ~65,000+ (as of 2025)
+     * This is updated periodically as MAL adds more anime.
      */
-    private const FALLBACK_TOTAL = 30230;
+    private const FALLBACK_TOTAL = 65000;
+
+    /**
+     * Estimated maximum MAL anime ID for iteration.
+     * MAL has gaps in IDs, so actual count < max ID.
+     * We use this to determine how far to iterate when fetching all anime.
+     */
+    private const ESTIMATED_MAX_MAL_ID = 65000;
 
     /**
      * Cache key and TTL for the dynamic anime total.
@@ -146,16 +154,17 @@ class AnimeListController extends Controller
     // ═══════════════════════════════════════════════════════════════════
 
     /**
-     * Get the total anime count from MAL, cached for 24 hours in MongoDB.
+     * Get the total anime count / max MAL ID for iteration.
      *
-     * MAL's browse page shows 50 anime per page at ?show=OFFSET.
-     * Strategy (minimal probes, rate-limit safe):
+     * IMPORTANT: MAL anime IDs are NOT sequential!
+     * - IDs range from 1 to ~65,000+ (as of 2025)
+     * - There are gaps (deleted anime, reserved IDs, etc.)
+     * - MAL's browse page only shows ~30k entries, but IDs go much higher
+     *
+     * Strategy:
      *  1. Return cached value if available (24 h TTL).
-     *  2. Fetch ONE page near the known total.
-     *  3. If partial page (1-49 results): total = offset + count (exact).
-     *  4. If full page (50): try next page to detect growth.
-     *  5. If empty (0): MAL is likely rate-limiting — return FALLBACK_TOTAL
-     *     WITHOUT caching, so we retry next time.
+     *  2. Try to find max MAL ID from recent anime page.
+     *  3. Fall back to ESTIMATED_MAX_MAL_ID if detection fails.
      */
     private function getAnimeTotal(): int
     {
@@ -172,41 +181,67 @@ class AnimeListController extends Controller
                 'Accept-Language' => 'en-US,en;q=0.5',
             ];
 
-            $perPage = 50;
-            $known   = self::FALLBACK_TOTAL;
-            $offset  = intdiv($known, $perPage) * $perPage;
+            // Method 1: Try to find max ID from MAL's recently added anime
+            // This page shows the newest anime with their actual IDs
+            try {
+                $response = $client->get('https://myanimelist.net/anime.php?o=2&w=1', [
+                    'headers' => array_merge($headers, ['Referer' => 'https://myanimelist.net/']),
+                    'timeout'  => 10,
+                ]);
 
-            // Single probe at the tail end
-            $count = $this->countAtOffset($client, $headers, $offset);
-
-            if ($count > 0 && $count < $perPage) {
-                // Partial page at the tail — exact total
-                $total = $offset + $count;
-                Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
-                return $total;
-            }
-
-            if ($count >= $perPage) {
-                // Full page — anime exist at least up to offset + 50
-                $total = $offset + $perPage;
-                // Try one page ahead to detect growth (max 1 extra request)
-                $nextCount = $this->countAtOffset($client, $headers, $offset + $perPage);
-                if ($nextCount > 0) {
-                    $total = $offset + $perPage + $nextCount;
+                if ($response->getStatusCode() === 200) {
+                    $html = (string) $response->getBody();
+                    
+                    // Extract all anime IDs from the page
+                    preg_match_all('/anime\/(\d+)/', $html, $matches);
+                    if (!empty($matches[1])) {
+                        $ids = array_map('intval', $matches[1]);
+                        $maxId = max($ids);
+                        
+                        // Only use if it's reasonable (> 1000)
+                        if ($maxId > 1000) {
+                            // Add buffer for new anime added since page load
+                            $estimatedTotal = (int)($maxId * 1.02) + 500;
+                            Cache::put(self::TOTAL_CACHE_KEY, $estimatedTotal, self::TOTAL_CACHE_TTL);
+                            return $estimatedTotal;
+                        }
+                    }
                 }
-                Cache::put(self::TOTAL_CACHE_KEY, $total, self::TOTAL_CACHE_TTL);
-                return $total;
+            } catch (\Exception $e) {
+                // Continue to fallback methods
             }
 
-            // count === 0: MAL is almost certainly rate-limiting us
-            // (the page at offset 30200 should have results).
-            // Do NOT cache — we'll retry on the next uncached request.
+            // Method 2: Check known high-value IDs to estimate max
+            // Binary search approach - check if IDs exist at various points
+            $checkPoints = [60000, 62000, 64000, 65000, 66000];
+            foreach ($checkPoints as $id) {
+                try {
+                    $resp = $client->get("https://myanimelist.net/anime/{$id}", [
+                        'headers' => $headers,
+                        'timeout'  => 5,
+                    ]);
+                    
+                    if ($resp->getStatusCode() === 200) {
+                        $body = (string) $resp->getBody();
+                        // Verify it's actually an anime page (not error/redirect)
+                        if (strpos($body, '<title>') !== false && strpos($body, 'MyAnimeList.net') !== false) {
+                            // This ID exists, so max is at least this high
+                            $estimatedTotal = (int)($id * 1.05) + 1000;
+                            Cache::put(self::TOTAL_CACHE_KEY, $estimatedTotal, self::TOTAL_CACHE_TTL);
+                            return $estimatedTotal;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    continue;
+                }
+            }
 
         } catch (\Exception $e) {
-            // MAL unreachable — don't cache, retry later
+            // All detection failed - use fallback
         }
 
-        return self::FALLBACK_TOTAL;
+        // Final fallback: Use estimated max MAL ID
+        return self::ESTIMATED_MAX_MAL_ID;
     }
 
     /**
