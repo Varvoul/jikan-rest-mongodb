@@ -71,8 +71,18 @@ class JikanResponseHandler
         $this->cacheExpiryFingerprint = "ttl:{$this->fingerprint}";
         $this->requestCached = Cache::has($this->fingerprint);
 
-        $this->route = explode('\\', $request->route()[1]['uses']);
-        $this->route = end($this->route);
+        // Safely extract route action - handle cases where route may not be resolved
+        $this->route = null;
+        try {
+            $route = $request->route();
+            if ($route !== null && isset($route[1]) && isset($route[1]['uses'])) {
+                $routeParts = explode('\\', $route[1]['uses']);
+                $this->route = end($routeParts);
+            }
+        } catch (\Exception $e) {
+            // Route not available, continue without route-specific logic
+            $this->route = null;
+        }
 
         // Check if request is in the 404 cache pool
         if (Cache::has("request:404:{$this->requestUriHash}")) {
@@ -86,7 +96,7 @@ class JikanResponseHandler
         }
 
         // Is the request queueable? (disabled for self-hosted, always use legacy mode)
-        if (\in_array($this->route, self::NON_QUEUEABLE) || env('CACHE_METHOD', 'legacy') === 'legacy') {
+        if ($this->route !== null && (\in_array($this->route, self::NON_QUEUEABLE) || env('CACHE_METHOD', 'legacy') === 'legacy')) {
             $this->queueable = false;
         }
 

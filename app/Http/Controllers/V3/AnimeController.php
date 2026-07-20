@@ -117,8 +117,36 @@ class AnimeController extends Controller
 
     public function episodes(int $id, int $page = 1)
     {
-        $anime = $this->jikan->getAnimeEpisodes(new AnimeEpisodesRequest($id, $page));
-        return response($this->serializer->serialize($anime, 'json'));
+        $perPage = 100;
+        
+        // Fetch all episodes for this anime
+        $episodesResult = $this->jikan->getAnimeEpisodes(new AnimeEpisodesRequest($id, $page));
+        $episodesData = json_decode($this->serializer->serialize($episodesResult, 'json'), true);
+        
+        // Extract episodes array from the response
+        $episodes = $episodesData['episodes'] ?? [];
+        $totalEpisodes = count($episodes);
+        
+        // Calculate pagination
+        $lastVisiblePage = max(1, (int) ceil($totalEpisodes / $perPage));
+        $hasNextPage = $page < $lastVisiblePage;
+        
+        // Build V4-style paginated response
+        $response = [
+            'pagination' => [
+                'last_visible_page' => $lastVisiblePage,
+                'has_next_page' => $hasNextPage,
+                'current_page' => $page,
+                'items' => [
+                    'count' => min($perPage, $totalEpisodes),
+                    'total' => $totalEpisodes,
+                    'per_page' => $perPage
+                ]
+            ],
+            'data' => array_values($episodes)
+        ];
+        
+        return response(json_encode($response));
     }
 
     public function news(int $id)
@@ -163,8 +191,94 @@ class AnimeController extends Controller
 
     public function recommendations(int $id)
     {
-        $anime = ['recommendations' => $this->jikan->getAnimeRecommendations(new AnimeRecommendationsRequest($id))];
-        return response($this->serializer->serialize($anime, 'json'));
+        // Fetch raw recommendations
+        $recommendations = $this->jikan->getAnimeRecommendations(new AnimeRecommendationsRequest($id));
+        $recommendationsData = json_decode($this->serializer->serialize(['recommendations' => $recommendations], 'json'), true);
+        
+        // Transform each recommendation to include all required V4 fields
+        $transformedRecommendations = [];
+        
+        foreach ($recommendationsData['recommendations'] ?? [] as $rec) {
+            // Fetch full anime data for this recommendation to get type, duration, rating
+            $recAnimeId = $rec['mal_id'] ?? null;
+            
+            // Build base recommendation entry
+            $entry = [
+                'mal_id' => $rec['mal_id'] ?? null,
+                'url' => $rec['url'] ?? null,
+                'images' => $rec['images'] ?? [
+                    'jpg' => ['image_url' => $rec['image_url'] ?? null],
+                    'webp' => ['image_url' => $rec['image_url'] ?? null, 'small_image_url' => null]
+                ],
+                'title' => $rec['title'] ?? null,
+                'recommendation_count' => $rec['recommendation_count'] ?? 0,
+                'recommendation_url' => $rec['recommendation_url'] ?? null,
+            ];
+            
+            // Add titles array in V4 format
+            $entry['titles'] = [
+                ['type' => 'Default', 'title' => $rec['title'] ?? null],
+            ];
+            if (!empty($rec['title_japanese'])) {
+                $entry['titles'][] = ['type' => 'Japanese', 'title' => $rec['title_japanese']];
+            }
+            
+            // Try to fetch additional anime data for required fields (type, duration, rating)
+            if ($recAnimeId) {
+                try {
+                    $animeDetails = $this->jikan->getAnime(new AnimeRequest($recAnimeId));
+                    $animeDetailsData = json_decode($this->serializer->serialize($animeDetails, 'json'), true);
+                    
+                    // Add required fields from full anime data
+                    $entry['type'] = $animeDetailsData['type'] ?? null;
+                    $entry['duration'] = $animeDetailsData['duration'] ?? null;
+                    $entry['rating'] = $animeDetailsData['rating'] ?? null;
+                    
+                    // Update images with better quality data if available
+                    if (isset($animeDetailsData['images'])) {
+                        $entry['images'] = $animeDetailsData['images'];
+                    }
+                    
+                    // Update titles with better data
+                    if (isset($animeDetailsData['titles']) && is_array($animeDetailsData['titles'])) {
+                        $entry['titles'] = $animeDetailsData['titles'];
+                    } elseif (isset($animeDetailsData['title'])) {
+                        $entry['titles'] = [
+                            ['type' => 'Default', 'title' => $animeDetailsData['title']]
+                        ];
+                        if (!empty($animeDetailsData['title_japanese'])) {
+                            $entry['titles'][] = ['type' => 'Japanese', 'title' => $animeDetailsData['title_japanese']];
+                        }
+                        if (!empty($animeDetailsData['title_english'])) {
+                            $entry['titles'][] = ['type' => 'English', 'title' => $animeDetailsData['title_english']];
+                        }
+                    }
+                } catch (\Exception $e) {
+                    // If we can't fetch details, use defaults
+                    $entry['type'] = $entry['type'] ?? null;
+                    $entry['duration'] = $entry['duration'] ?? null;
+                    $entry['rating'] = $entry['rating'] ?? null;
+                }
+            } else {
+                // No anime ID available, set defaults
+                $entry['type'] = null;
+                $entry['duration'] = null;
+                $entry['rating'] = null;
+            }
+            
+            $transformedRecommendations[] = $entry;
+        }
+        
+        // Build V4-style response
+        $response = [
+            'data' => $transformedRecommendations,
+            'pagination' => [
+                'last_visible_page' => 1,
+                'has_next_page' => false
+            ]
+        ];
+        
+        return response(json_encode($response));
     }
 
     public function userupdates(int $id, int $page = 1)
