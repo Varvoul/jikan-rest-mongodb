@@ -448,11 +448,42 @@ class TopController extends Controller
             $nicknames = is_array($c['nicknames']) ? $c['nicknames'] : [$c['nicknames']];
         }
 
+        // Extract name - try multiple sources in order of preference
+        $name = '';
+        $url = $c['url'] ?? '';
+        
+        // PRIMARY: Extract name from URL first (most reliable for MAL data)
+        // URL format: https://myanimelist.net/character/417/Lelouch_Lamperouge
+        if (strlen($url) > 0 && strpos($url, '/character/') !== false) {
+            $matches = [];
+            if (preg_match('#/character/\d+/(.+)$#', $url, $matches)) {
+                $extracted = str_replace('_', ', ', urldecode($matches[1]));
+                if (strlen($extracted) > 0) {
+                    $name = $extracted;
+                }
+            }
+        }
+        
+        // FALLBACK: Try direct 'name' field if URL extraction failed
+        if (strlen($name) === 0 && isset($c['name']) && is_string($c['name']) && strlen(trim($c['name'])) > 0) {
+            $name = trim($c['name']);
+        }
+        
+        // FALLBACK: Try 'title' field
+        if (strlen($name) === 0 && isset($c['title']) && is_string($c['title']) && strlen(trim($c['title'])) > 0) {
+            $name = trim($c['title']);
+        }
+        
+        // LAST RESORT: Use mal_id as identifier
+        if (strlen($name) === 0 && isset($c['mal_id'])) {
+            $name = 'Character #' . $c['mal_id'];
+        }
+
         return [
             'mal_id'        => $c['mal_id'] ?? null,
             'url'           => $c['url'] ?? '',
             'images'        => $images,
-            'name'          => $c['name'] ?? '',
+            'name'          => $name,
             'name_kanji'    => $c['name_kanji'] ?? null,
             'nicknames'     => $nicknames,
             'favorites'     => isset($c['favorites']) ? (int) $c['favorites'] : null,
