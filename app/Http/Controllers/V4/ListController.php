@@ -239,6 +239,11 @@ class ListController extends V3Controller
         $results = $data['top'] ?? [];
         $lastPage = $this->estimateLastPage($results, $page, 50);
 
+        // DEBUG: Log first item structure to diagnose name extraction issue
+        if (!empty($results) && app()->environment('local', 'testing', 'development')) {
+            \Log::info('TopCharacters raw first item:', [array_keys($results[0] ?? []), 'name' => ($results[0]['name'] ?? 'NOT SET'), 'title' => ($results[0]['title'] ?? 'NOT SET'), 'url' => ($results[0]['url'] ?? 'NOT SET')]);
+        }
+
         // Transform to V4 format with full fields
         $v4Data = [];
         foreach (array_slice($results, 0, $limit) as $item) {
@@ -489,27 +494,28 @@ class ListController extends V3Controller
 
         // Extract name - try multiple sources in order of preference
         $name = '';
+        $url = $c['url'] ?? '';
         
         // 1. Try direct 'name' field (if non-empty string)
-        if (!empty($c['name']) && is_string($c['name']) && trim($c['name']) !== '') {
+        if (isset($c['name']) && is_string($c['name']) && strlen(trim($c['name'])) > 0) {
             $name = trim($c['name']);
         }
         
         // 2. Try 'title' field
-        if ($name === '' && !empty($c['title']) && is_string($c['title']) && trim($c['title']) !== '') {
+        if (strlen($name) === 0 && isset($c['title']) && is_string($c['title']) && strlen(trim($c['title'])) > 0) {
             $name = trim($c['title']);
         }
         
         // 3. Fallback: extract name from URL (e.g., /character/417/Lelouch_Lamperouge)
-        if ($name === '' && !empty($c['url'])) {
-            if (preg_match('#/character/\d+/(.+)$#', $c['url'], $m)) {
-                $name = str_replace('_', ', ', $m[1]);
-                $name = urldecode($name);
+        if (strlen($name) === 0 && strlen($url) > 0) {
+            $matches = [];
+            if (preg_match('#/character/\d+/(.+)$#', $url, $matches)) {
+                $name = str_replace('_', ', ', urldecode($matches[1]));
             }
         }
         
         // 4. Last resort: use mal_id as identifier
-        if ($name === '' && !empty($c['mal_id'])) {
+        if (strlen($name) === 0 && isset($c['mal_id'])) {
             $name = 'Character #' . $c['mal_id'];
         }
 
