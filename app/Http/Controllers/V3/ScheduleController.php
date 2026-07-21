@@ -61,7 +61,9 @@ class ScheduleController extends Controller
                 // Enrich anime entries with full data
                 $enrichedAnime = [];
                 foreach ($daySchedule as $anime) {
-                    $enrichedAnime[] = $this->enrichScheduleAnime($anime);
+                    // Convert AnimeCard object to array if needed
+                    $animeArray = is_array($anime) ? $anime : json_decode($this->serializer->serialize($anime, 'json'), true);
+                    $enrichedAnime[] = $this->enrichScheduleAnime($animeArray);
                 }
                 
                 // Paginate results
@@ -105,7 +107,9 @@ class ScheduleController extends Controller
                 // Enrich each anime entry
                 $enrichedDayAnime = [];
                 foreach ($dayAnime as $anime) {
-                    $enrichedDayAnime[] = $this->enrichScheduleAnime($anime);
+                    // Convert AnimeCard object to array if needed
+                    $animeArray = is_array($anime) ? $anime : json_decode($this->serializer->serialize($anime, 'json'), true);
+                    $enrichedDayAnime[] = $this->enrichScheduleAnime($animeArray);
                 }
                 
                 $allDays[$dayName] = [
