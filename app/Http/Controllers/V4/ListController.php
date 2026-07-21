@@ -523,11 +523,6 @@ class ListController extends V3Controller
             'url'        => $c['url'] ?? '',
             'images'     => $images,
             'name'       => $name,
-            '_debug_name_extraction' => [
-                'source_url' => substr($c['url'] ?? '', -30),
-                'extracted_name' => $name,
-                'has_url' => !empty($c['url']),
-            ],
             'name_kanji' => $c['name_kanji'] ?? null,
             'nicknames'  => $nicknames,
             'favorites'  => isset($c['favorites']) ? (int) $c['favorites'] : null,
