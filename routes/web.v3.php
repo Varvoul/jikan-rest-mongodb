@@ -54,7 +54,11 @@ $router->group(
         ]);
 
         // Anime total cache management - for when MAL adds new anime
+        // Supports both POST (API) and GET (browser) methods
         $router->post('/clear_anime_total_cache', [
+           'uses' => 'MetaController@clearAnimeTotalCache'
+        ]);
+        $router->get('/clear_anime_total_cache', [
            'uses' => 'MetaController@clearAnimeTotalCache'
         ]);
 

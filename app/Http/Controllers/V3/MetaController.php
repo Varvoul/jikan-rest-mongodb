@@ -215,11 +215,13 @@ class MetaController extends Controller
     }
 
     /**
-     * POST /meta/clear_anime_total_cache
+     * POST/GET /meta/clear_anime_total_cache
      *
      * Clears the cached anime total count, forcing recalculation
      * on next /v4/anime request. This is useful after updating
      * the ESTIMATED_MAX_MAL_ID or when MAL adds many new anime.
+     * 
+     * Supports both POST (API clients) and GET (browser) methods.
      */
     public function clearAnimeTotalCache()
     {
@@ -241,7 +243,7 @@ class MetaController extends Controller
                 'status' => 'ok',
                 'message' => 'Anime total cache cleared successfully. Next /v4/anime request will recalculate the total.',
                 'deleted_from_mongo' => $result->getDeletedCount(),
-                'note' => 'New total will be estimated by checking recent MAL anime IDs (up to 65,000+)',
+                'note' => 'New total will be estimated by checking recent MAL anime IDs (up to 75,000+)',
                 'timestamp' => date('c'),
             ]);
         } catch (\Exception $e) {

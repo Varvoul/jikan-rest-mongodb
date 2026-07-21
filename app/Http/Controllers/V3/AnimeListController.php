@@ -10,17 +10,18 @@ class AnimeListController extends Controller
 {
     /**
      * Fallback total if MAL is unreachable.
-     * MAL anime IDs currently go up to ~65,000+ (as of 2025)
+     * MAL anime IDs currently go up to ~71,000+ (as of 2025-2026)
      * This is updated periodically as MAL adds more anime.
      */
-    private const FALLBACK_TOTAL = 65000;
+    private const FALLBACK_TOTAL = 75000;
 
     /**
      * Estimated maximum MAL anime ID for iteration.
      * MAL has gaps in IDs, so actual count < max ID.
      * We use this to determine how far to iterate when fetching all anime.
+     * Updated: MAL now has anime IDs up to 71,000+ (Jan 2026)
      */
-    private const ESTIMATED_MAX_MAL_ID = 65000;
+    private const ESTIMATED_MAX_MAL_ID = 75000;
 
     /**
      * Cache key and TTL for the dynamic anime total.
@@ -157,7 +158,7 @@ class AnimeListController extends Controller
      * Get the total anime count / max MAL ID for iteration.
      *
      * IMPORTANT: MAL anime IDs are NOT sequential!
-     * - IDs range from 1 to ~65,000+ (as of 2025)
+     * - IDs range from 1 to ~75,000+ (as of 2026)
      * - There are gaps (deleted anime, reserved IDs, etc.)
      * - MAL's browse page only shows ~30k entries, but IDs go much higher
      *
@@ -213,7 +214,8 @@ class AnimeListController extends Controller
 
             // Method 2: Check known high-value IDs to estimate max
             // Binary search approach - check if IDs exist at various points
-            $checkPoints = [60000, 62000, 64000, 65000, 66000];
+            // Updated Jan 2026: MAL now has IDs up to 71,000+
+            $checkPoints = [68000, 70000, 72000, 74000, 75000];
             foreach ($checkPoints as $id) {
                 try {
                     $resp = $client->get("https://myanimelist.net/anime/{$id}", [
