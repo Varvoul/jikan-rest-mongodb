@@ -104,10 +104,10 @@ class AnimeListController extends Controller
 
         if ($descending) {
             // Descending: highest ID first
-            // Actual MAL max anime ID is ~64-65K as of 2026 (not 75K!)
-            // The 'total' is count of valid IDs (~66K), but IDs have gaps so max ID < total + buffer
-            // Use conservative estimate: total works well since MAL IDs are fairly dense up to ~65K
-            $maxEstimate = min((int) ($total * 1.02) + 1000, 68000);
+            // IMPORTANT: Actual measured max MAL anime ID (Jan 2026) is ~64,654
+            // The 'total' count (~66K) is higher than max ID due to how MAL counts entries
+            // We MUST start from a realistic max ID or we'll scan 404s forever
+            $maxEstimate = 65000; // Conservative upper bound based on actual MAL data
             $startId     = $maxEstimate - (($page - 1) * $limit);
             // Ensure we don't start below 1 for very late pages
             $startId     = max(1, $startId);
