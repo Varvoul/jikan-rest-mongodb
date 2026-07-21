@@ -104,8 +104,9 @@ class AnimeListController extends Controller
 
         if ($descending) {
             // Descending: highest ID first
-            // Estimate max MAL anime ID (total + ~45% gap factor)
-            $maxEstimate = (int) ($total * 1.82);
+            // Use ESTIMATED_MAX_MAL_ID as starting point (actual MAL IDs go up to ~70-75K)
+            // NOT total * 1.82 which gave 120K+ (way beyond real IDs)
+            $maxEstimate = min((int) ($total * 1.15), self::ESTIMATED_MAX_MAL_ID);
             $startId     = $maxEstimate - (($page - 1) * $limit);
             $direction   = -1; // count down
         } else {
@@ -117,7 +118,8 @@ class AnimeListController extends Controller
         $animeList = [];
         $currentId = $startId;
         $attempts  = 0;
-        $maxAttempts = $limit * 5; // generous buffer for ID gaps
+        // Use larger buffer for descending (more gaps at high ID range)
+        $maxAttempts = $descending ? ($limit * 10) : ($limit * 5);
 
         while (count($animeList) < $limit && $attempts < $maxAttempts) {
             $attempts++;
