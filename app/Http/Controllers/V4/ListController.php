@@ -239,11 +239,6 @@ class ListController extends V3Controller
         $results = $data['top'] ?? [];
         $lastPage = $this->estimateLastPage($results, $page, 50);
 
-        // DEBUG: Log first item structure to diagnose name extraction issue
-        if (!empty($results) && app()->environment('local', 'testing', 'development')) {
-            \Log::info('TopCharacters raw first item:', [array_keys($results[0] ?? []), 'name' => ($results[0]['name'] ?? 'NOT SET'), 'title' => ($results[0]['title'] ?? 'NOT SET'), 'url' => ($results[0]['url'] ?? 'NOT SET')]);
-        }
-
         // Transform to V4 format with full fields
         $v4Data = [];
         foreach (array_slice($results, 0, $limit) as $item) {
@@ -496,25 +491,29 @@ class ListController extends V3Controller
         $name = '';
         $url = $c['url'] ?? '';
         
-        // 1. Try direct 'name' field (if non-empty string)
-        if (isset($c['name']) && is_string($c['name']) && strlen(trim($c['name'])) > 0) {
+        // PRIMARY: Extract name from URL first (most reliable for MAL data)
+        // URL format: https://myanimelist.net/character/417/Lelouch_Lamperouge
+        if (strlen($url) > 0 && strpos($url, '/character/') !== false) {
+            $matches = [];
+            if (preg_match('#/character/\d+/(.+)$#', $url, $matches)) {
+                $extracted = str_replace('_', ', ', urldecode($matches[1]));
+                if (strlen($extracted) > 0) {
+                    $name = $extracted;
+                }
+            }
+        }
+        
+        // FALLBACK: Try direct 'name' field if URL extraction failed
+        if (strlen($name) === 0 && isset($c['name']) && is_string($c['name']) && strlen(trim($c['name'])) > 0) {
             $name = trim($c['name']);
         }
         
-        // 2. Try 'title' field
+        // FALLBACK: Try 'title' field
         if (strlen($name) === 0 && isset($c['title']) && is_string($c['title']) && strlen(trim($c['title'])) > 0) {
             $name = trim($c['title']);
         }
         
-        // 3. Fallback: extract name from URL (e.g., /character/417/Lelouch_Lamperouge)
-        if (strlen($name) === 0 && strlen($url) > 0) {
-            $matches = [];
-            if (preg_match('#/character/\d+/(.+)$#', $url, $matches)) {
-                $name = str_replace('_', ', ', urldecode($matches[1]));
-            }
-        }
-        
-        // 4. Last resort: use mal_id as identifier
+        // LAST RESORT: Use mal_id as identifier
         if (strlen($name) === 0 && isset($c['mal_id'])) {
             $name = 'Character #' . $c['mal_id'];
         }
