@@ -161,6 +161,18 @@ $app->router->group(
     }
 );
 
+// Load V4-specific routes (seasons/now, seasons/upcoming, top/*, recommendations/*)
+$app->router->group(
+    [
+        'prefix' => 'v4',
+        'namespace' => 'App\Http\Controllers\V4',
+        'middleware' => $commonMiddleware
+    ],
+    function ($router) {
+        require __DIR__.'/../routes/web.v4.php';
+    }
+);
+
 $app->router->group(
     [
         'prefix' => '/',

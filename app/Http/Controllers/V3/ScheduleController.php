@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\V3;
 
+use Illuminate\Http\Request;
 use Jikan\Request\Schedule\ScheduleRequest;
 use Jikan\Request\Anime\AnimeRequest;
 

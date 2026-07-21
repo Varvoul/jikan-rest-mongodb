@@ -487,13 +487,30 @@ class ListController extends V3Controller
             $nicknames = is_array($c['nicknames']) ? $c['nicknames'] : [$c['nicknames']];
         }
 
-        // Extract name - try multiple sources
-        $name = $c['title'] ?? $c['name'] ?? '';
+        // Extract name - try multiple sources in order of preference
+        $name = '';
+        
+        // 1. Try direct 'name' field (if non-empty string)
+        if (!empty($c['name']) && is_string($c['name']) && trim($c['name']) !== '') {
+            $name = trim($c['name']);
+        }
+        
+        // 2. Try 'title' field
+        if ($name === '' && !empty($c['title']) && is_string($c['title']) && trim($c['title']) !== '') {
+            $name = trim($c['title']);
+        }
+        
+        // 3. Fallback: extract name from URL (e.g., /character/417/Lelouch_Lamperouge)
         if ($name === '' && !empty($c['url'])) {
-            // Fallback: extract name from URL (e.g., /character/417/Lelouch_Lamperouge)
             if (preg_match('#/character/\d+/(.+)$#', $c['url'], $m)) {
                 $name = str_replace('_', ', ', $m[1]);
+                $name = urldecode($name);
             }
+        }
+        
+        // 4. Last resort: use mal_id as identifier
+        if ($name === '' && !empty($c['mal_id'])) {
+            $name = 'Character #' . $c['mal_id'];
         }
 
         return [
