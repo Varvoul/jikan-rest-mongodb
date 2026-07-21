@@ -1,13 +1,14 @@
 <?php
 
-$router->get('/anime', [
-    'uses' => 'ListController@anime'
-]);
+/**
+ * V4-Specific Routes
+ * 
+ * These routes are ONLY for endpoints that don't exist in V3.
+ * Routes for /top/*, /anime/{id}, etc. are defined in web.v3.php
+ * and loaded under /v4 prefix in bootstrap/app.php.
+ */
 
-$router->get('/manga', [
-    'uses' => 'ListController@manga'
-]);
-
+// Seasons endpoints (V4-specific: /seasons/now, /seasons/upcoming)
 $router->group(
     ['prefix' => 'seasons'],
     function () use ($router) {
@@ -21,27 +22,7 @@ $router->group(
     }
 );
 
-$router->group(
-    ['prefix' => 'top'],
-    function () use ($router) {
-        $router->get('/anime[/{page:[0-9]+}]', [
-            'uses' => 'ListController@topAnime'
-        ]);
-
-        $router->get('/manga[/{page:[0-9]+}]', [
-            'uses' => 'ListController@topManga'
-        ]);
-
-        $router->get('/characters[/{page:[0-9]+}]', [
-            'uses' => 'ListController@topCharacters'
-        ]);
-
-        $router->get('/people[/{page:[0-9]+}]', [
-            'uses' => 'ListController@topPeople'
-        ]);
-    }
-);
-
+// Recommendations endpoints (V4-specific format)
 $router->group(
     ['prefix' => 'recommendations'],
     function () use ($router) {
