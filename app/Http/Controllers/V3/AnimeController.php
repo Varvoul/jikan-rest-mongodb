@@ -130,7 +130,8 @@ class AnimeController extends Controller
         if (isset($picturesData['pictures']) && is_array($picturesData['pictures'])) {
             $combined['pictures'] = [];
             foreach ($picturesData['pictures'] as $pic) {
-                $picUrl = $pic['image_url'] ?? ($pic['large_image_url'] ?? '');
+                // Jikan returns pictures with 'large' and 'small' keys (or 'image_url')
+                $picUrl = $pic['large'] ?? $pic['image_url'] ?? ($pic['large_image_url'] ?? '');
                 $combined['pictures'][] = [
                     'images' => $this->buildV4ImagesObject($picUrl),
                 ];
