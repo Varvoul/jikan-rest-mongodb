@@ -35,23 +35,114 @@ class AnimeController extends Controller
         $picturesResult = $this->jikan->getAnimePictures(new AnimePicturesRequest($id));
         $picturesData = json_decode($this->serializer->serialize(['pictures' => $picturesResult], 'json'), true);
 
-        // 3. Characters & Voice Actors (includes main + supporting, Japanese + English)
+        // 3. Characters & Voice Actors (includes main + supporting, Japanese + English) - KEEP AS-IS
         $charactersStaffResult = $this->jikan->getAnimeCharactersAndStaff(new AnimeCharactersAndStaffRequest($id));
         $charactersStaffData = json_decode($this->serializer->serialize($charactersStaffResult, 'json'), true);
 
-        // 4. Statistics
+        // 4. Statistics - KEEP AS-IS
         $statsResult = $this->jikan->getAnimeStats(new AnimeStatsRequest($id));
         $statsData = json_decode($this->serializer->serialize($statsResult, 'json'), true);
 
-        // Combine all data into a single response
-        $combined = $mainData;
+        // ═══════════════════════════════════════════════════════════════════
+        //  TRANSFORM MAIN ANIME DATA TO V4 FORMAT
+        // ═══════════════════════════════════════════════════════════════════
 
-        // Add pictures
-        if (isset($picturesData['pictures'])) {
-            $combined['pictures'] = $picturesData['pictures'];
+        // ── Images: V4 format (jpg + webp) ──
+        $imageUrl = $mainData['image_url'] ?? '';
+        $combined['images'] = $this->buildV4ImagesObject($imageUrl);
+        unset($mainData['image_url']);
+
+        // ── Trailer: V4 format (object with embed_url + images) ──
+        $trailerUrl = $mainData['trailer_url'] ?? '';
+        $combined['trailer'] = [
+            'youtube_id' => null,
+            'url'         => !empty($trailerUrl) ? $trailerUrl : null,
+            'embed_url'   => !empty($trailerUrl) ? $trailerUrl : null,
+            'images'      => [
+                'image_url'        => null,
+                'small_image_url'  => null,
+                'medium_image_url' => null,
+                'large_image_url'  => null,
+                'maximum_image_url'=> null,
+            ],
+        ];
+        // Extract YouTube ID if present
+        if (!empty($trailerUrl) && preg_match('#(?:youtube\.com/embed/|youtu\.be/)([a-zA-Z0-9_-]+)#', $trailerUrl, $m)) {
+            $combined['trailer']['youtube_id'] = $m[1];
+        }
+        unset($mainData['trailer_url']);
+
+        // ── Titles: V4 format (array of objects) ──
+        $titles = [
+            ['type' => 'Default', 'title' => $mainData['title'] ?? ''],
+        ];
+        if (!empty($mainData['title_japanese'])) {
+            $titles[] = ['type' => 'Japanese', 'title' => $mainData['title_japanese']];
+        }
+        if (!empty($mainData['title_english'])) {
+            $titles[] = ['type' => 'English', 'title' => $mainData['title_english']];
+        }
+        foreach ($mainData['title_synonyms'] ?? [] as $syn) {
+            $titles[] = ['type' => 'Synonym', 'title' => $syn];
+        }
+        $combined['titles'] = $titles;
+
+        // ── Copy remaining V4 fields from mainData ──
+        $v4Fields = [
+            'mal_id', 'url', 'approved', 'title', 'title_english', 'title_japanese',
+            'title_synonyms', 'type', 'source', 'episodes', 'status', 'airing',
+            'aired', 'duration', 'rating', 'score', 'scored_by', 'rank', 'popularity',
+            'members', 'favorites', 'synopsis', 'background', 'producers', 'licensors',
+            'studios', 'genres', 'explicit_genres', 'demographics', 'themes',
+            'opening_themes', 'ending_themes', 'external_links'
+        ];
+        foreach ($v4Fields as $field) {
+            if (isset($mainData[$field])) {
+                $combined[$field] = $mainData[$field];
+            }
         }
 
-        // Add characters and voice actors
+        // ── Broadcast: V4 structured object ──
+        if (isset($mainData['broadcast'])) {
+            if (is_array($mainData['broadcast'])) {
+                $combined['broadcast'] = $mainData['broadcast'];
+            } elseif (is_string($mainData['broadcast']) && $mainData['broadcast'] !== '') {
+                $combined['broadcast'] = $this->parseBroadcastToV4($mainData['broadcast']);
+            }
+        }
+
+        // ── Season + Year from premiered field ──
+        if (isset($mainData['premiered']) && is_string($mainData['premiered']) && $mainData['premiered'] !== '') {
+            $seasonMap = [
+                'Winter' => 'winter', 'Spring' => 'spring',
+                'Summer' => 'summer', 'Fall' => 'fall',
+            ];
+            if (preg_match('/^(\w+)\s+(\d{4})$/', $mainData['premiered'], $m)) {
+                $combined['season'] = strtolower($seasonMap[$m[1]] ?? $m[1]);
+                $combined['year'] = (int) $m[2];
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  PICTURES: Transform to V4 format (jpg + webp for each image)
+        // ═══════════════════════════════════════════════════════════════════
+
+        if (isset($picturesData['pictures']) && is_array($picturesData['pictures'])) {
+            $combined['pictures'] = [];
+            foreach ($picturesData['pictures'] as $pic) {
+                $picUrl = $pic['image_url'] ?? ($pic['large_image_url'] ?? '');
+                $combined['pictures'][] = [
+                    'images' => $this->buildV4ImagesObject($picUrl),
+                ];
+            }
+        } else {
+            $combined['pictures'] = [];
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  CHARACTERS & VOICE ACTORS - KEEP ORIGINAL FORMAT (V3 style)
+        // ═══════════════════════════════════════════════════════════════════
+
         if (isset($charactersStaffData['characters'])) {
             $combined['characters'] = $charactersStaffData['characters'];
         }
@@ -59,54 +150,82 @@ class AnimeController extends Controller
             $combined['staff'] = $charactersStaffData['staff'];
         }
 
-        // Add statistics
+        // ═══════════════════════════════════════════════════════════════════
+        //  STATISTICS - KEEP ORIGINAL FORMAT (V3 style)
+        // ═══════════════════════════════════════════════════════════════════
+
         foreach ($statsData as $key => $value) {
             if (!isset($combined[$key])) {
                 $combined[$key] = $value;
             }
         }
 
-        // === V4-style field transformations ===
-
-        // Transform premiered string ("Fall 2002") → season + year
-        if (isset($combined['premiered']) && is_string($combined['premiered']) && $combined['premiered'] !== '') {
-            $premiered = $combined['premiered'];
-            $seasonMap = [
-                'Winter' => 'winter', 'Spring' => 'spring',
-                'Summer' => 'summer', 'Fall' => 'fall',
-            ];
-            if (preg_match('/^(\w+)\s+(\d{4})$/', $premiered, $m)) {
-                $seasonName = strtolower($seasonMap[$m[1]] ?? $m[1]);
-                $combined['season'] = $seasonName;
-                $combined['year'] = (int) $m[2];
-                $combined['string'] = $seasonName . '-' . $m[2];
-            }
-            // Remove the old string field
-            unset($combined['premiered']);
-        }
-
-        // Transform broadcast string ("Thursdays at 19:30 (JST)") → structured object
-        if (isset($combined['broadcast']) && is_string($combined['broadcast']) && $combined['broadcast'] !== '') {
-            $broadcast = $combined['broadcast'];
-            $broadcastObj = ['string' => $broadcast];
-
-            // Parse "Day at HH:MM (TZ)"
-            if (preg_match('/^(\w+)s?\s+at\s+(\d{1,2}:\d{2})\s*\(([^)]+)\)/i', $broadcast, $m)) {
-                $broadcastObj['day'] = $m[1];
-                $broadcastObj['time'] = $m[2];
-                $broadcastObj['timezone'] = $m[3];
-            } elseif (preg_match('/^(\w+)s?\s+at\s+(\d{1,2}:\d{2})/i', $broadcast, $m)) {
-                $broadcastObj['day'] = $m[1];
-                $broadcastObj['time'] = $m[2];
-                $broadcastObj['timezone'] = 'Asia/Tokyo';
-            } elseif (preg_match('/^(\w+)/', $broadcast, $m)) {
-                $broadcastObj['day'] = $m[1];
-            }
-
-            $combined['broadcast'] = $broadcastObj;
-        }
-
         return response(json_encode($combined));
+    }
+
+    /**
+     * Build V4-style images object with both JPG and WebP formats
+     * 
+     * @param string $url Original image URL from MAL
+     * @return array V4 images structure with jpg and webp sub-objects
+     */
+    private function buildV4ImagesObject(string $url): array
+    {
+        if (empty($url)) {
+            return [
+                'jpg'  => ['image_url' => null, 'small_image_url' => null, 'large_image_url' => null],
+                'webp' => ['image_url' => null, 'small_image_url' => null, 'large_image_url' => null],
+            ];
+        }
+
+        // Remove any query strings and sizing prefixes
+        $baseUrl = preg_replace('#/r/\d+x\d+/#', '/', $url);
+        $baseUrl = preg_replace('#\?.*$#', '', $baseUrl);
+
+        // Build base URL without extension
+        $baseNoExt = preg_replace('#\.(webp|jpg|jpeg|png|gif)$#i', '', $baseUrl);
+
+        // Build jpg variants (MAL serves .jpg, .t.jpg for small, .l.jpg for large)
+        $jpg = [
+            'image_url'        => $baseNoExt . '.jpg',
+            'small_image_url'  => $baseNoExt . 't.jpg',
+            'large_image_url'  => $baseNoExt . 'l.jpg',
+        ];
+
+        // Build webp variants (same naming pattern)
+        $webp = [
+            'image_url'        => $baseNoExt . '.webp',
+            'small_image_url'  => $baseNoExt . 't.webp',
+            'large_image_url'  => $baseNoExt . 'l.webp',
+        ];
+
+        return ['jpg' => $jpg, 'webp' => $webp];
+    }
+
+    /**
+     * Parse broadcast string to V4 structured object
+     * 
+     * @param string $broadcast Raw broadcast string like "Thursdays at 19:30 (JST)"
+     * @return array V4 broadcast object
+     */
+    private function parseBroadcastToV4(string $broadcast): array
+    {
+        $broadcastObj = ['string' => $broadcast];
+
+        // Parse "Day at HH:MM (TZ)"
+        if (preg_match('/^(\w+)s?\s+at\s+(\d{1,2}:\d{2})\s*\(([^)]+)\)/i', $broadcast, $m)) {
+            $broadcastObj['day'] = $m[1];
+            $broadcastObj['time'] = $m[2];
+            $broadcastObj['timezone'] = $m[3];
+        } elseif (preg_match('/^(\w+)s?\s+at\s+(\d{1,2}:\d{2})/i', $broadcast, $m)) {
+            $broadcastObj['day'] = $m[1];
+            $broadcastObj['time'] = $m[2];
+            $broadcastObj['timezone'] = 'Asia/Tokyo';
+        } elseif (preg_match('/^(\w+)/', $broadcast, $m)) {
+            $broadcastObj['day'] = $m[1];
+        }
+
+        return $broadcastObj;
     }
 
     public function characters_staff(int $id)
