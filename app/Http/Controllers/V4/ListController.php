@@ -331,11 +331,17 @@ class ListController extends V3Controller
         $offset = ($page - 1) * $limit;
         $results = array_slice($allItems, $offset, $limit);
 
-        if ($sfw) {
-            $results = $this->filterSfw($results);
+        // ✅ FIX: Transform each season anime item to V4 format with proper images object
+        $transformedResults = [];
+        foreach ($results as $item) {
+            $transformedResults[] = $this->transformSeasonAnimeToV4($item);
         }
 
-        return response($this->buildV4Response($results, $page, $limit, $lastPage, $total));
+        if ($sfw) {
+            $transformedResults = $this->filterSfw($transformedResults);
+        }
+
+        return response($this->buildV4Response($transformedResults, $page, $limit, $lastPage, $total));
     }
 
     private function scrapeRecommendations(Request $request, string $type)
@@ -609,6 +615,63 @@ class ListController extends V3Controller
             'voice_acting_roles'    => $voiceActingRoles,
             'author_positions'      => [],
         ];
+    }
+
+    /**
+     * Transform V3 seasonal anime entry to V4 format.
+     * Converts image_url → images{jpg, webp} structure with all required V4 fields.
+     */
+    private function transformSeasonAnimeToV4(array $item): array
+    {
+        // Remove V3 metadata fields
+        unset($item['request_hash'], $item['request_cached'], $item['request_cache_expiry']);
+        
+        // Extract image URL and build V4 images object using existing method
+        $imageUrl = $item['image_url'] ?? '';
+        $images = $this->buildImagesObject($imageUrl);
+        
+        // Replace image_url with images object
+        unset($item['image_url']);
+        $item['images'] = $images;
+        
+        // Ensure other V4 required fields exist with proper defaults
+        $item['trailer'] = $item['trailer'] ?? [
+            'youtube_id' => null,
+            'url' => null,
+            'embed_url' => null,
+            'images' => [
+                'image_url' => null,
+                'small_image_url' => null,
+                'medium_image_url' => null,
+                'large_image_url' => null,
+                'maximum_image_url' => null,
+            ],
+        ];
+        
+        $item['approved'] = $item['approved'] ?? true;
+        $item['titles'] = $item['titles'] ?? [
+            ['type' => 'Default', 'title' => $item['title'] ?? 'Unknown'],
+        ];
+        
+        // Ensure airing field exists
+        if (!isset($item['airing'])) {
+            $item['airing'] = false;
+        }
+        
+        // Convert airing_start to aired object if needed
+        if (isset($item['airing_start']) && !isset($item['aired'])) {
+            $item['aired'] = [
+                'from' => $item['airing_start'],
+                'to' => null,
+                'prop' => [
+                    'from' => null,
+                    'to' => null,
+                ],
+                'string' => $item['airing_start'] ? date('M j, Y', strtotime($item['airing_start'])) : null,
+            ];
+        }
+        
+        return $item;
     }
 
     /**
