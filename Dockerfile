@@ -30,12 +30,28 @@ RUN MONGODB_VERSION="1.15.3" && \
 # Verify mongodb extension is loaded
 RUN php -m | grep mongodb
 
-# Copy application code
+# Copy application code FIRST
 COPY . /app
 WORKDIR /app
 
-# Create storage directories (writable at build time for the image layer)
+# Create storage directories
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
+
+# =====================================================
+# FIX: Run composer install DURING BUILD (not just runtime)
+# This ensures vendor/ folder is baked into the image
+# =====================================================
+RUN COMPOSER_MEMORY_LIMIT=-1 composer install \
+    --no-dev \
+    --no-interaction \
+    --no-scripts \
+    --prefer-dist \
+    --ignore-platform-reqs \
+    --optimize-autoloader \
+    2>&1
+
+# Verify vendor/autoload.php exists
+RUN test -f vendor/autoload.php || (echo "ERROR: vendor/autoload.php not found!" && exit 1)
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh
