@@ -1,54 +1,75 @@
 #!/bin/bash
+set -e
 
 cd /app
+
+echo "[entrypoint] Starting Jikan API container initialization..."
 
 # Ensure storage exists for error logging
 mkdir -p storage/framework/cache storage/logs storage/app
 chmod -R 777 storage 2>/dev/null || true
 
 install_success=0
+MAX_RETRIES=3
 
-if [ -f "composer.lock" ]; then
-    echo "[entrypoint] Attempting composer install from lock file..."
-    COMPOSER_MEMORY_LIMIT=-1 composer install \
-        --no-dev \
-        --no-interaction \
-        --no-scripts \
-        --prefer-dist \
-        --ignore-platform-reqs \
-        2>&1 | tee /tmp/composer-lock-install.log
+# Function to run composer install with retries
+run_composer_install() {
+    local attempt=1
+    while [ $attempt -le $MAX_RETRIES ]; do
+        echo "[entrypoint] Composer install attempt $attempt/$MAX_RETRIES..."
+        
+        if [ -f "composer.lock" ]; then
+            echo "[entrypoint] Installing from lock file..."
+            COMPOSER_MEMORY_LIMIT=-1 composer install \
+                --no-dev \
+                --no-interaction \
+                --no-scripts \
+                --prefer-dist \
+                --ignore-platform-reqs \
+                2>&1 | tee /tmp/composer-install.log
+            
+            if [ ${PIPESTATUS[0]} -eq 0 ] && [ -f "vendor/autoload.php" ]; then
+                return 0
+            fi
+            echo "[entrypoint] Lock file install failed, will retry without lock..."
+            rm -f composer.lock
+        fi
+        
+        # Fresh install without lock
+        echo "[entrypoint] Running fresh composer install..."
+        rm -rf vendor 2>/dev/null || true
+        
+        COMPOSER_MEMORY_LIMIT=-1 composer install \
+            --no-dev \
+            --no-interaction \
+            --no-scripts \
+            --prefer-dist \
+            --ignore-platform-reqs \
+            --no-cache \
+            2>&1 | tee /tmp/composer-install.log
+        
+        if [ ${PIPESTATUS[0]} -eq 0 ] && [ -f "vendor/autoload.php" ]; then
+            return 0
+        fi
+        
+        attempt=$((attempt + 1))
+        if [ $attempt -le $MAX_RETRIES ]; then
+            echo "[entrypoint] Retry $attempt/$MAX_RETRIES after 10s sleep..."
+            sleep 10
+        fi
+    done
+    return 1
+}
 
-    if [ ${PIPESTATUS[0]} -eq 0 ] && [ -f "vendor/autoload.php" ]; then
-        install_success=1
-        echo "[entrypoint] Lock file install succeeded"
-    else
-        echo "[entrypoint] Lock file install failed, removing lock and retrying..."
-        rm -f composer.lock
-    fi
-fi
-
-if [ $install_success -eq 0 ]; then
-    echo "[entrypoint] Running composer install (fresh resolve)..."
-    rm -rf vendor composer.lock
-    COMPOSER_MEMORY_LIMIT=-1 composer install \
-        --no-dev \
-        --no-interaction \
-        --no-scripts \
-        --prefer-dist \
-        --ignore-platform-reqs \
-        --no-cache \
-        2>&1 | tee /tmp/composer-install.log
-
-    COMPOSER_EXIT=${PIPESTATUS[0]}
-
-    if [ $COMPOSER_EXIT -ne 0 ]; then
-        echo "[entrypoint] ERROR: composer install failed (exit $COMPOSER_EXIT)"
-        echo "COMPOSER_INSTALL_FAILED" > /app/storage/composer_error.txt
-        tail -20 /tmp/composer-install.log >> /app/storage/composer_error.txt
-    else
-        install_success=1
-        echo "[entrypoint] Install succeeded"
-    fi
+# Run composer install
+if run_composer_install; then
+    install_success=1
+    echo "[entrypoint] ✅ Composer install succeeded!"
+else
+    echo "[entrypoint] ❌ Composer install failed after $MAX_RETRIES attempts"
+    echo "[entrypoint] Last 30 lines of install log:"
+    tail -30 /tmp/composer-install.log 2>/dev/null || echo "No log available"
+    echo "COMPOSER_INSTALL_FAILED" > /app/storage/composer_error.txt
 fi
 
 # === Apply runtime patches (runs regardless of install path) ===
@@ -82,43 +103,37 @@ POLYFILL
     fi
 
     # Patch jikan-me/jikan AnimeParser for new MAL HTML structure
-    # MAL removed the "anime_detail_related_anime" class; now uses "related-entries" div
     if [ -f /app/patch-related.php ]; then
-        echo "[entrypoint] Patching Jikan AnimeParser::getRelated() for new MAL HTML..."
-        php /app/patch-related.php 2>&1 | tee /tmp/patch-related.log
-        PATCH_EXIT=${PIPESTATUS[0]}
-        if [ $PATCH_EXIT -ne 0 ]; then
-            echo "[entrypoint] WARNING: patch-related.php exited with code $PATCH_EXIT"
-        fi
-    else
-        echo "[entrypoint] WARNING: patch-related.php not found, skipping parser patch"
+        echo "[entrypoint] Patching Jikan AnimeParser::getRelated()..."
+        php /app/patch-related.php 2>&1 | tee /tmp/patch-related.log || true
     fi
 
     # Patch jikan-me/jikan AnimeParser for new MAL external links format
     if [ -f /app/patch-external.php ]; then
-        echo "[entrypoint] Patching Jikan AnimeParser::getExternalLinks() for new MAL HTML..."
-        php /app/patch-external.php 2>&1 | tee /tmp/patch-external.log
-        PATCH_EXIT=${PIPESTATUS[0]}
-        if [ $PATCH_EXIT -ne 0 ]; then
-            echo "[entrypoint] WARNING: patch-external.php exited with code $PATCH_EXIT"
-        fi
+        echo "[entrypoint] Patching Jikan AnimeParser::getExternalLinks()..."
+        php /app/patch-external.php 2>&1 | tee /tmp/patch-external.log || true
     fi
+    
+    echo "[entrypoint] ✅ All patches applied!"
 else
-    echo "[entrypoint] WARNING: vendor/autoload.php not found, skipping patches"
+    echo "[entrypoint] ⚠️ WARNING: vendor/autoload.php not found, skipping patches"
+    echo "[entrypoint] The API will not work without composer dependencies!"
 fi
 
-# Show installed mongodb version
-php -r "
-    \$f = '/app/vendor/composer/installed.json';
-    if (file_exists(\$f)) {
-        \$data = json_decode(file_get_contents(\$f), true);
-        foreach (\$data as \$p) {
-            if (isset(\$p['name']) && \$p['name'] === 'mongodb/mongodb') {
-                echo '[entrypoint] mongodb/mongodb: ' . (\$p['version'] ?? '?') . PHP_EOL;
+# Show installed mongodb version if available
+if [ -f "vendor/autoload.php" ]; then
+    php -r "
+        \$f = '/app/vendor/composer/installed.json';
+        if (file_exists(\$f)) {
+            \$data = json_decode(file_get_contents(\$f), true);
+            foreach (\$data as \$p) {
+                if (isset(\$p['name']) && \$p['name'] === 'mongodb/mongodb') {
+                    echo '[entrypoint] mongodb/mongodb: ' . (\$p['version'] ?? '?') . PHP_EOL;
+                }
             }
         }
-    }
-" 2>&1 || true
+    " 2>&1 || true
+fi
 
 echo "[entrypoint] Starting PHP built-in server on port 10000..."
 exec php ${PHP_EXTRA:-} -S 0.0.0.0:10000 -t public
