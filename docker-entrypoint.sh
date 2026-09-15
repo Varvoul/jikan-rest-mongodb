@@ -147,4 +147,7 @@ if [ -f "vendor/autoload.php" ]; then
 fi
 
 echo "[entrypoint] Starting PHP built-in server on port 10000..."
-exec php ${PHP_EXTRA:-} -S 0.0.0.0:10000 -t public
+# -d error_reporting=8191 (E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED) mirrors
+# bootstrap/app.php but takes effect at SAPI level — catches deprecations that
+# fire during composer autoload before any PHP code can call error_reporting().
+exec php -d error_reporting=8191 ${PHP_EXTRA:-} -S 0.0.0.0:10000 -t public
