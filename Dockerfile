@@ -38,15 +38,20 @@ RUN php -m | grep mongodb
 WORKDIR /app
 
 # Install PHP dependencies at BUILD time so vendor/ is baked into the image.
-# Composer files are copied first so this layer is cached across code-only changes.
+# Only composer.json is copied: the historical composer.lock was internally
+# inconsistent (doctrine/lexer & psr/log locked at majors conflicting with the
+# locked dependents' constraints) and made `composer install` fail validation.
+# The previous runtime workaround deleted the lock and resolved fresh — we do
+# the same here, deterministically. jikan-me/jikan is pinned exactly in
+# composer.json so fresh resolution cannot drift the parser version.
 # Flags mirror the historically-working entrypoint install (--no-scripts avoids
 # ocramius/package-versions plugin issues; --ignore-platform-reqs because ext-mongodb
 # is compiled from source above).
 ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_MEMORY_LIMIT=-1 \
     COMPOSER_NO_AUDIT=1
-COPY composer.json composer.lock ./
-RUN composer install \
+COPY composer.json ./
+RUN rm -f composer.lock && composer install \
     --no-dev \
     --no-interaction \
     --no-scripts \
