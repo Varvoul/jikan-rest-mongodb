@@ -64,6 +64,13 @@ RUN rm -f composer.lock && composer install \
 # Copy the rest of the application code (does NOT remove the vendor/ layer above)
 COPY . /app
 
+# === TEMPORARY DIAGNOSTIC (remove after finding the parse error) ===
+# List every vendor file containing 'readonly' outside mongodb lib
+RUN grep -rn 'readonly' /app/vendor --include='*.php' | grep -v '/vendor/mongodb/mongodb/src/' | head -40 || true
+# Lint every vendor php file; print only files that FAIL to parse
+RUN find /app/vendor -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" | head -40 || true
+# === END TEMPORARY DIAGNOSTIC ===
+
 # Create storage directories (writable at build time for the image layer)
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
 
