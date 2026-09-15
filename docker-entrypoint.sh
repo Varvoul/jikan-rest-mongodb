@@ -87,6 +87,19 @@ fi
 if [ $install_success -eq 1 ] && [ -f "vendor/autoload.php" ]; then
     echo "[entrypoint] Applying runtime patches..."
 
+    # jms/serializer 1.x: `final class ReadOnly` is a parse error on PHP 8.1
+    # (readonly is a reserved class name). Rename the annotation class — it is
+    # unused by this app's models. Idempotent: skipped when already renamed
+    # (see the same patch in the Dockerfile, applied right after composer install).
+    JMS_DIR="/app/vendor/jms/serializer/src/JMS/Serializer"
+    if [ -f "$JMS_DIR/Annotation/ReadOnly.php" ]; then
+        echo "[entrypoint] Renaming jms/serializer ReadOnly class (PHP 8.1 reserved word)..."
+        mv "$JMS_DIR/Annotation/ReadOnly.php" "$JMS_DIR/Annotation/ReadOnlyAnnotation.php"
+        sed -i 's/\bReadOnly\b/ReadOnlyAnnotation/g' "$JMS_DIR/Annotation/ReadOnlyAnnotation.php"
+        sed -i 's/\bReadOnly\b/ReadOnlyAnnotation/g' "$JMS_DIR/Metadata/Driver/AnnotationDriver.php"
+        COMPOSER_ALLOW_SUPERUSER=1 composer dump-autoload -o >/dev/null 2>&1 || true
+    fi
+
     # Patch mongodb/mongodb if it has PHP 8.1+ syntax
     if [ -d /app/vendor/mongodb/mongodb/src ]; then
         # Check for 'readonly' keyword (PHP 8.1+)

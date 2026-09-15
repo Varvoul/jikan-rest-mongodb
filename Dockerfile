@@ -59,17 +59,28 @@ RUN rm -f composer.lock && composer install \
     --prefer-dist \
     --ignore-platform-reqs \
     --optimize-autoloader \
-    && test -f vendor/autoload.php
+    && test -f vendor/autoload.php \
+# jms/serializer 1.x declares `final class ReadOnly` — `readonly` became a
+# reserved class name in PHP 8.1, so that file and AnnotationDriver.php (which
+# references it) fail to parse and every cache-miss request 500s with
+# "syntax error, unexpected token \"readonly\"". The annotation is unused by
+# this app's models, so rename the class and refresh the optimized classmap.
+# Mirrored (guarded, idempotent) in docker-entrypoint.sh for the runtime
+# fallback install path.
+    && if [ -f vendor/jms/serializer/src/JMS/Serializer/Annotation/ReadOnly.php ]; then \
+        mv vendor/jms/serializer/src/JMS/Serializer/Annotation/ReadOnly.php \
+           vendor/jms/serializer/src/JMS/Serializer/Annotation/ReadOnlyAnnotation.php \
+        && sed -i 's/\bReadOnly\b/ReadOnlyAnnotation/g' \
+           vendor/jms/serializer/src/JMS/Serializer/Annotation/ReadOnlyAnnotation.php \
+        && sed -i 's/\bReadOnly\b/ReadOnlyAnnotation/g' \
+           vendor/jms/serializer/src/JMS/Serializer/Metadata/Driver/AnnotationDriver.php \
+        && composer dump-autoload -o >/dev/null 2>&1 || true; \
+    fi \
+    && php -l vendor/jms/serializer/src/JMS/Serializer/Annotation/ReadOnlyAnnotation.php \
+    && php -l vendor/jms/serializer/src/JMS/Serializer/Metadata/Driver/AnnotationDriver.php
 
 # Copy the rest of the application code (does NOT remove the vendor/ layer above)
 COPY . /app
-
-# === TEMPORARY DIAGNOSTIC (remove after finding the parse error) ===
-# List every vendor file containing 'readonly' outside mongodb lib
-RUN grep -rn 'readonly' /app/vendor --include='*.php' | grep -v '/vendor/mongodb/mongodb/src/' | head -40 || true
-# Lint every vendor php file; print only files that FAIL to parse
-RUN find /app/vendor -name '*.php' -exec php -l {} \; 2>&1 | grep -v "No syntax errors" | head -40 || true
-# === END TEMPORARY DIAGNOSTIC ===
 
 # Create storage directories (writable at build time for the image layer)
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
