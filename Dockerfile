@@ -1,4 +1,9 @@
-FROM php:8.0-cli
+FROM php:8.1-cli
+# NOTE: php:8.0-cli was based on Debian 11 (bullseye) which went EOL 2026-08-31;
+# its security mirror now 404s (libssl-dev/libcurl4) and breaks every build.
+# php:8.1-cli is Debian 12 (bookworm, supported until 2028). PHP 8.1 is one
+# minor above 8.0 — the app already handles 8.1 syntax (readonly strip + polyfill
+# in docker-entrypoint.sh are harmless no-ops on 8.1).
 
 # Install system dependencies needed for mongodb extension compilation
 RUN apt-get update && apt-get install -y \
