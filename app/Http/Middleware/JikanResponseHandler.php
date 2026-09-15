@@ -184,15 +184,77 @@ class JikanResponseHandler
 
     private function cacheMutation(array $data) : array
     {
-        if (!($this->requestType === 'anime' || $this->requestType === 'manga')) {
+        if ($this->requestType === 'anime' || $this->requestType === 'manga') {
+            // Fix JSON response for empty related object
+            if (isset($data['related']) && \count($data['related']) === 0) {
+                $data['related'] = new \stdClass();
+            }
+        }
+
+        // AniList-style compatibility: expose `title_romaji` alias mirroring the
+        // MAL "Default" title (the romanized/latin-script title shown on MAL pages).
+        // MAL itself has no separate "romaji" field, so the Default title IS the
+        // romaji title. Applied at the response layer (after cache retrieval) so
+        // it also upgrades already-cached entries without a cache purge.
+        $data = $this->applyTitleRomaji($data);
+
+        return $data;
+    }
+
+    /**
+     * Recursively apply title_romaji to a response payload.
+     * Handles both single-object responses and list responses (`data` arrays).
+     */
+    private function applyTitleRomaji(array $data) : array
+    {
+        if (\array_key_exists('data', $data) && \is_array($data['data'])) {
+            foreach ($data['data'] as $key => $value) {
+                if (\is_array($value)) {
+                    $data['data'][$key] = $this->applyTitleRomaji($value);
+                }
+            }
             return $data;
         }
 
-        // Fix JSON response for empty related object
-        if (isset($data['related']) && \count($data['related']) === 0) {
-            $data['related'] = new \stdClass();
+        return $this->withTitleRomaji($data);
+    }
+
+    /**
+     * Add `title_romaji` to a single anime/manga object.
+     * Prefers the "Default" entry of the `titles` array; falls back to `title`
+     * for v3-style serializer output (plain /anime/{id}, /manga/{id}).
+     * Episode objects (which already expose `title_romanji`) and other
+     * non-anime objects (forum topics, news, characters) are left untouched.
+     */
+    private function withTitleRomaji(array $item) : array
+    {
+        if (\array_key_exists('title_romaji', $item)) {
+            return $item;
         }
 
-        return $data;
+        if (isset($item['titles']) && \is_array($item['titles'])) {
+            foreach ($item['titles'] as $title) {
+                if (\is_array($title)
+                    && \strcasecmp((string) ($title['type'] ?? ''), 'Default') === 0
+                    && isset($title['title'])
+                    && \is_string($title['title'])
+                    && $title['title'] !== ''
+                ) {
+                    $item['title_romaji'] = $title['title'];
+                    return $item;
+                }
+            }
+        }
+
+        if (isset($item['title'])
+            && \is_string($item['title'])
+            && $item['title'] !== ''
+            && !\array_key_exists('title_romanji', $item)
+            && (\array_key_exists('title_english', $item) || \array_key_exists('titles', $item))
+        ) {
+            $item['title_romaji'] = $item['title'];
+        }
+
+        return $item;
     }
 }
