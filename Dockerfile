@@ -30,9 +30,29 @@ RUN MONGODB_VERSION="1.15.3" && \
 # Verify mongodb extension is loaded
 RUN php -m | grep mongodb
 
-# Copy application code
-COPY . /app
 WORKDIR /app
+
+# Install PHP dependencies at BUILD time so vendor/ is baked into the image.
+# Composer files are copied first so this layer is cached across code-only changes.
+# Flags mirror the historically-working entrypoint install (--no-scripts avoids
+# ocramius/package-versions plugin issues; --ignore-platform-reqs because ext-mongodb
+# is compiled from source above).
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_MEMORY_LIMIT=-1 \
+    COMPOSER_NO_AUDIT=1
+COPY composer.json composer.lock ./
+RUN composer install \
+    --no-dev \
+    --no-interaction \
+    --no-scripts \
+    --no-progress \
+    --prefer-dist \
+    --ignore-platform-reqs \
+    --optimize-autoloader \
+    && test -f vendor/autoload.php
+
+# Copy the rest of the application code (does NOT remove the vendor/ layer above)
+COPY . /app
 
 # Create storage directories (writable at build time for the image layer)
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage

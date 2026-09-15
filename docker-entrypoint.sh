@@ -12,7 +12,15 @@ chmod -R 777 storage 2>/dev/null || true
 install_success=0
 MAX_RETRIES=3
 
-# Function to run composer install with retries
+# If vendor/ was already baked into the image at build time (see Dockerfile),
+# skip the runtime install entirely — this is what makes cold starts reliable.
+if [ -f "vendor/autoload.php" ]; then
+    install_success=1
+    echo "[entrypoint] ✅ vendor/autoload.php found (installed at build time) — skipping composer install"
+fi
+
+# Function to run composer install with retries (FALLBACK ONLY — used when the
+# image was built without vendor/ or vendor is missing/corrupted)
 run_composer_install() {
     local attempt=1
     while [ $attempt -le $MAX_RETRIES ]; do
@@ -61,15 +69,18 @@ run_composer_install() {
     return 1
 }
 
-# Run composer install
-if run_composer_install; then
-    install_success=1
-    echo "[entrypoint] ✅ Composer install succeeded!"
-else
-    echo "[entrypoint] ❌ Composer install failed after $MAX_RETRIES attempts"
-    echo "[entrypoint] Last 30 lines of install log:"
-    tail -30 /tmp/composer-install.log 2>/dev/null || echo "No log available"
-    echo "COMPOSER_INSTALL_FAILED" > /app/storage/composer_error.txt
+# Run composer install only as a fallback when vendor is missing
+if [ $install_success -eq 0 ]; then
+    echo "[entrypoint] vendor/ missing from image — running fallback composer install..."
+    if run_composer_install; then
+        install_success=1
+        echo "[entrypoint] ✅ Composer install succeeded!"
+    else
+        echo "[entrypoint] ❌ Composer install failed after $MAX_RETRIES attempts"
+        echo "[entrypoint] Last 30 lines of install log:"
+        tail -30 /tmp/composer-install.log 2>/dev/null || echo "No log available"
+        echo "COMPOSER_INSTALL_FAILED" > /app/storage/composer_error.txt
+    fi
 fi
 
 # === Apply runtime patches (runs regardless of install path) ===
