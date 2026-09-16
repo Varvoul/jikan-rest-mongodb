@@ -96,8 +96,8 @@ class AnimeController extends Controller
         }
         $combined['titles'] = $titles;
 
-        // DEBUG: Deployment verification
-        $combined['_deploy_version'] = '2026-09-17-v3';
+        // DEBUG: Deployment verification - v5 with timestamp
+        $combined['_deploy_version'] = 'v5-20260916-1837';
 
         // ── Copy remaining V4 fields from mainData ──
         $v4Fields = [
