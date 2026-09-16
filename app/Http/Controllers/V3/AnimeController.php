@@ -96,8 +96,9 @@ class AnimeController extends Controller
         }
         $combined['titles'] = $titles;
 
-        // DEBUG: Deployment verification - v5 with timestamp
-        $combined['_deploy_version'] = 'v5-20260916-1837';
+        // DEBUG: Deployment verification - v6 BREAKING TEST
+        $combined['_deploy_version'] = 'v6-BREAKING-TEST';
+        $combined['_romanji_test'] = ['type' => 'Romanji', 'title' => $mainData['title_romaji'] ?? 'NONE'];
 
         // ── Copy remaining V4 fields from mainData ──
         $v4Fields = [
