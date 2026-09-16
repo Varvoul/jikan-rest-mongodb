@@ -35,12 +35,40 @@ class EtagMiddleware
 
         $fingerprint = HttpHelper::resolveRequestFingerprint($request);
 
+        // 304 revalidation must compare against the ETag of the FINAL decorated
+        // body (post cacheMutation / title_romaji), matching what
+        // JikanResponseHandler actually serves. Comparing the raw pre-mutation
+        // cache hash made clients holding pre-patch ETags receive 304 forever
+        // and never see schema-affecting patches.
+        $cached = Cache::get($fingerprint);
         if (
             $request->hasHeader('If-None-Match')
-            && Cache::has($fingerprint)
-            && md5(Cache::get($fingerprint)) === $request->header('If-None-Match')
+            && \is_string($cached)
+            && $cached !== ''
         ) {
-                return response('', 304);
+            $decoded = json_decode($cached, true);
+            if (\is_array($decoded)) {
+                $etag = md5(
+                    json_encode(
+                        JikanResponseHandler::decorateForResponse(
+                            $decoded,
+                            HttpHelper::requestType($request)
+                        )
+                    )
+                );
+
+                // Normalize the incoming header: browsers echo the stored ETag
+                // verbatim, e.g. W/"abc" or "abc" -> abc
+                $incoming = \trim((string) $request->header('If-None-Match'));
+                $incoming = \preg_replace('/^W\//', '', $incoming);
+                $incoming = \trim((string) $incoming, '"');
+
+                if ($etag === $incoming) {
+                    return response('', 304)
+                        ->header('ETag', $request->header('If-None-Match'))
+                        ->header('Cache-Control', 'private, no-cache, max-age=0, must-revalidate');
+                }
+            }
         }
 
         return $next($request);

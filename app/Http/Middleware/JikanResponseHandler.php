@@ -137,6 +137,12 @@ class JikanResponseHandler
         $cacheMutable = json_decode($cache, true);
         $cacheMutable = $this->cacheMutation($cacheMutable);
 
+        // ETag must reflect the FINAL decorated body (after cacheMutation /
+        // title_romaji). Hashing the raw pre-mutation cache made clients with
+        // pre-patch ETags receive 304 Not Modified forever, locking them onto
+        // stale bodies even though the response schema changed.
+        $etag = md5(json_encode($cacheMutable));
+
         $response = array_merge($meta, $cacheMutable);
 
         $headers = [
@@ -151,16 +157,22 @@ class JikanResponseHandler
             $headers['X-API-Deprecation-Info'] = env('APP_DEPRECATION_INFO');
         }
 
-        // Build and return response
+        // Revalidation-based HTTP caching. Previously a far-future `Expires`
+        // header let browsers/CDNs consider responses "fresh" for up to the
+        // MongoDB cache TTL and serve stale bodies without contacting the
+        // origin. With no-cache + max-age=0 every client must revalidate
+        // (cheap 304 when unchanged), so response-shape patches propagate
+        // immediately.
         return response()
             ->json(
                 $response
             )
             ->setEtag(
-                md5($cache)
+                $etag
             )
             ->withHeaders($headers)
-            ->setExpires((new \DateTime())->setTimestamp($this->requestCacheExpiry));
+            ->header('Cache-Control', 'private, no-cache, max-age=0, must-revalidate')
+            ->header('Expires', gmdate('D, d M Y H:i:s', time()) . ' GMT');
     }
 
     private function generateMeta(Request $request) : array
@@ -184,39 +196,47 @@ class JikanResponseHandler
 
     private function cacheMutation(array $data) : array
     {
-        if ($this->requestType === 'anime' || $this->requestType === 'manga') {
-            // Fix JSON response for empty related object
+        return self::decorateForResponse($data, (string) $this->requestType);
+    }
+
+    /**
+     * Shared response decoration used by BOTH the response builder and the
+     * ETag computation, so ETags always match the final served body.
+     *
+     * 1. AniList-style compatibility: expose `title_romaji` alias mirroring the
+     *    MAL "Default" title (the romanized/latin-script title shown on MAL
+     *    pages). MAL has no separate "romaji" field, so the Default title IS
+     *    the romaji title. Applied at the response layer (after cache
+     *    retrieval) so it also upgrades already-cached entries.
+     * 2. Fix JSON response for empty related object (v3 anime/manga only).
+     */
+    public static function decorateForResponse(array $data, string $requestType) : array
+    {
+        if ($requestType === 'anime' || $requestType === 'manga') {
             if (isset($data['related']) && \count($data['related']) === 0) {
                 $data['related'] = new \stdClass();
             }
         }
 
-        // AniList-style compatibility: expose `title_romaji` alias mirroring the
-        // MAL "Default" title (the romanized/latin-script title shown on MAL pages).
-        // MAL itself has no separate "romaji" field, so the Default title IS the
-        // romaji title. Applied at the response layer (after cache retrieval) so
-        // it also upgrades already-cached entries without a cache purge.
-        $data = $this->applyTitleRomaji($data);
-
-        return $data;
+        return self::applyTitleRomaji($data);
     }
 
     /**
      * Recursively apply title_romaji to a response payload.
      * Handles both single-object responses and list responses (`data` arrays).
      */
-    private function applyTitleRomaji(array $data) : array
+    private static function applyTitleRomaji(array $data) : array
     {
         if (\array_key_exists('data', $data) && \is_array($data['data'])) {
             foreach ($data['data'] as $key => $value) {
                 if (\is_array($value)) {
-                    $data['data'][$key] = $this->applyTitleRomaji($value);
+                    $data['data'][$key] = self::applyTitleRomaji($value);
                 }
             }
             return $data;
         }
 
-        return $this->withTitleRomaji($data);
+        return self::withTitleRomaji($data);
     }
 
     /**
@@ -226,7 +246,7 @@ class JikanResponseHandler
      * Episode objects (which already expose `title_romanji`) and other
      * non-anime objects (forum topics, news, characters) are left untouched.
      */
-    private function withTitleRomaji(array $item) : array
+    private static function withTitleRomaji(array $item) : array
     {
         if (\array_key_exists('title_romaji', $item)) {
             return $item;
