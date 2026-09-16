@@ -92,4 +92,4 @@ RUN chmod +x /docker-entrypoint.sh
 EXPOSE 10000
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-# Force rebuild Wed Sep 16 18:12:45 UTC 2026
+# Force rebuild Wed Sep 16 18:36:00 UTC 2026 - Romanji fix v4
