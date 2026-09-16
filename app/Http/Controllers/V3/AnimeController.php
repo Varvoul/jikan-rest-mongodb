@@ -86,9 +86,7 @@ class AnimeController extends Controller
         }
         // Always add Romanji (romaji) title if available - type is useful for consumers
         // even if text matches another title (e.g., Default is often the romaji)
-        if (!empty($mainData['title_romaji'])) {
-            $titles[] = ['type' => 'Romanji', 'title' => $mainData['title_romaji']];
-        }
+        $titles[] = ['type' => 'Romanji', 'title' => $mainData['title_romaji'] ?? ''];
         foreach ($mainData['title_synonyms'] ?? [] as $syn) {
             $titles[] = ['type' => 'Synonym', 'title' => $syn];
         }
