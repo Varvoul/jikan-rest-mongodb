@@ -83,20 +83,10 @@ class AnimeController extends Controller
         if (!empty($mainData['title_english'])) {
             $titles[] = ['type' => 'English', 'title' => $mainData['title_english']];
         }
-        // Add Romanji (romaji) title if available and different from English
+        // Always add Romanji (romaji) title if available - type is useful for consumers
+        // even if text matches another title (e.g., Default is often the romaji)
         if (!empty($mainData['title_romaji'])) {
-            $romajiTitle = $mainData['title_romaji'];
-            // Only add if it's not duplicate of existing titles
-            $isDuplicate = false;
-            foreach ($titles as $existing) {
-                if (strtolower($existing['title']) === strtolower($romajiTitle)) {
-                    $isDuplicate = true;
-                    break;
-                }
-            }
-            if (!$isDuplicate) {
-                $titles[] = ['type' => 'Romanji', 'title' => $romajiTitle];
-            }
+            $titles[] = ['type' => 'Romanji', 'title' => $mainData['title_romaji']];
         }
         foreach ($mainData['title_synonyms'] ?? [] as $syn) {
             $titles[] = ['type' => 'Synonym', 'title' => $syn];
