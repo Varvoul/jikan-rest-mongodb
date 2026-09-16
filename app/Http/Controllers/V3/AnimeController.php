@@ -74,6 +74,7 @@ class AnimeController extends Controller
 
         // ── Titles: V4 format (array of objects) ──
         // Order: Default → Japanese → English → Romanji → Synonym
+        // v2: Always include Romanji type for API consumers
         $titles = [
             ['type' => 'Default', 'title' => $mainData['title'] ?? ''],
         ];
