@@ -91,6 +91,9 @@ class AnimeController extends Controller
             $titles[] = ['type' => 'Synonym', 'title' => $syn];
         }
         $combined['titles'] = $titles;
+        
+        // DEBUG: Verify deployment
+        $combined['_debug_romanji_fix'] = 'v3-' . date('Y-m-d');
 
         // ── Copy remaining V4 fields from mainData ──
         $v4Fields = [
