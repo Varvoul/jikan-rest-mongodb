@@ -73,6 +73,7 @@ class AnimeController extends Controller
         unset($mainData['trailer_url']);
 
         // ── Titles: V4 format (array of objects) ──
+        // Order: Default → Japanese → English → Romanji → Synonym
         $titles = [
             ['type' => 'Default', 'title' => $mainData['title'] ?? ''],
         ];
@@ -82,6 +83,21 @@ class AnimeController extends Controller
         if (!empty($mainData['title_english'])) {
             $titles[] = ['type' => 'English', 'title' => $mainData['title_english']];
         }
+        // Add Romanji (romaji) title if available and different from English
+        if (!empty($mainData['title_romaji'])) {
+            $romajiTitle = $mainData['title_romaji'];
+            // Only add if it's not duplicate of existing titles
+            $isDuplicate = false;
+            foreach ($titles as $existing) {
+                if (strtolower($existing['title']) === strtolower($romajiTitle)) {
+                    $isDuplicate = true;
+                    break;
+                }
+            }
+            if (!$isDuplicate) {
+                $titles[] = ['type' => 'Romanji', 'title' => $romajiTitle];
+            }
+        }
         foreach ($mainData['title_synonyms'] ?? [] as $syn) {
             $titles[] = ['type' => 'Synonym', 'title' => $syn];
         }
@@ -90,16 +106,41 @@ class AnimeController extends Controller
         // ── Copy remaining V4 fields from mainData ──
         $v4Fields = [
             'mal_id', 'url', 'approved', 'title', 'title_english', 'title_japanese',
-            'title_synonyms', 'type', 'source', 'episodes', 'status', 'airing',
+            'title_romaji', 'title_synonyms', 'type', 'source', 'episodes', 'status', 'airing',
             'aired', 'duration', 'rating', 'score', 'scored_by', 'rank', 'popularity',
             'members', 'favorites', 'synopsis', 'background', 'producers', 'licensors',
             'studios', 'genres', 'explicit_genres', 'demographics', 'themes',
-            'opening_themes', 'ending_themes', 'external_links'
+            'opening_themes', 'ending_themes', 'external_links', 'related'
         ];
         foreach ($v4Fields as $field) {
             if (isset($mainData[$field])) {
                 $combined[$field] = $mainData[$field];
             }
+        }
+
+        // ── Relations: Transform to V4 array format ──
+        // Jikan returns: {"Sequel": [...], "Adaptation": [...]}
+        // V4 expects: [{"relation": "Sequel", "items": [...]}, ...]
+        if (isset($combined['related']) && is_array($combined['related'])) {
+            // Check if it's already in V4 format (array of objects with 'relation' key)
+            $firstItem = reset($combined['related']);
+            if (!isset($firstItem['relation']) && !isset($firstItem['items'])) {
+                // Transform from associative array to V4 array format
+                $relationsV4 = [];
+                foreach ($combined['related'] as $relationType => $items) {
+                    if (is_array($items)) {
+                        $relationsV4[] = [
+                            'relation' => $relationType,
+                            'items' => $items
+                        ];
+                    }
+                }
+                $combined['relations'] = $relationsV4;
+            } else {
+                // Already in V4 format, just rename to 'relations'
+                $combined['relations'] = $combined['related'];
+            }
+            unset($combined['related']); // Remove old 'related' key, use 'relations'
         }
 
         // ── Broadcast: V4 structured object ──
