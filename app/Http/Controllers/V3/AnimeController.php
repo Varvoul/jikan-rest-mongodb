@@ -88,6 +88,7 @@ class AnimeController extends Controller
         // Always add Romanji (romaji) title if available - type is useful for consumers
         // even if text matches another title (e.g., Default is often the romaji)
         $romanjiTitle = $mainData['title_romaji'] ?? '';
+        $combined['_debug_romanji'] = ['raw_value' => $romanjiTitle, 'is_empty' => empty($romanjiTitle)];
         if (!empty($romanjiTitle)) {
             $titles[] = ['type' => 'Romanji', 'title' => $romanjiTitle];
         }
