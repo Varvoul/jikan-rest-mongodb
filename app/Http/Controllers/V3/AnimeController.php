@@ -75,7 +75,7 @@ class AnimeController extends Controller
 
         // ── Titles: V4 format (array of objects) ──
         // Order: Default → Japanese → English → Romanji → Synonym
-        // v2: Always include Romanji type for API consumers
+        // NOTE: Jikan v3 doesn't have title_romaji field - the main 'title' IS the romaji
         $titles = [
             ['type' => 'Default', 'title' => $mainData['title'] ?? ''],
         ];
@@ -85,15 +85,12 @@ class AnimeController extends Controller
         if (!empty($mainData['title_english'])) {
             $titles[] = ['type' => 'English', 'title' => $mainData['title_english']];
         }
-        // Always add Romanji (romaji) title if available - type is useful for consumers
-        // even if text matches another title (e.g., Default is often the romaji)
-        $romanjiTitle = $mainData['title_romaji'] ?? '';
-        $combined['_debug_romanji'] = [
-            'raw_value' => $romanjiTitle, 
-            'is_empty' => empty($romanjiTitle),
-            'has_title_romaji_key' => array_key_exists('title_romaji', $mainData),
-            'all_keys' => array_keys($mainData)
-        ];
+        // Add Romanji (romaji) - use main title since Jikan v3 doesn't separate title_romaji
+        // Only add if different from Default to avoid duplication
+        $romanjiTitle = $mainData['title'] ?? '';
+        $defaultTitle = $mainData['title'] ?? '';
+        $englishTitle = $mainData['title_english'] ?? '';
+        // Add Romanji if we have a title (always include for API consumers who expect this type)
         if (!empty($romanjiTitle)) {
             $titles[] = ['type' => 'Romanji', 'title' => $romanjiTitle];
         }
