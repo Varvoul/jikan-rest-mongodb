@@ -1,5 +1,5 @@
 <?php
-n// Deployed: 2026-09-17T00:00:00Z - Romanji fix
+// Jikan REST API with V4 enhancements (Romanji + Relations)
 
 namespace App\Http\Controllers\V3;
 
@@ -95,10 +95,6 @@ class AnimeController extends Controller
             $titles[] = ['type' => 'Synonym', 'title' => $syn];
         }
         $combined['titles'] = $titles;
-
-        // DEBUG: Deployment verification - v6 BREAKING TEST
-        $combined['_deploy_version'] = 'v6-BREAKING-TEST';
-        $combined['_romanji_test'] = ['type' => 'Romanji', 'title' => $mainData['title_romaji'] ?? 'NONE'];
 
         // ── Copy remaining V4 fields from mainData ──
         $v4Fields = [
