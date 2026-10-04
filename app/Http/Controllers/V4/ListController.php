@@ -844,12 +844,15 @@ class ListController extends V3Controller
         }
         
         if (empty($candidates)) {
-            return response()->json([
+            $errorResponse = [
                 'status'  => 404,
                 'type'    => 'NotFound',
                 'message' => 'No quality anime found after ' . $maxAttempts . ' attempts. Try lowering min_score.',
                 'error'   => null,
-            ], 404);
+            ];
+            return response(json_encode($errorResponse, JSON_UNESCAPED_UNICODE))
+                ->header('Content-Type', 'application/json')
+                ->setStatusCode(404);
         }
         
         // Sort by quality and pick from top 5
