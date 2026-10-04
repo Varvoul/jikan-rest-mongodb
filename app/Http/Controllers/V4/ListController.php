@@ -707,4 +707,155 @@ class ListController extends V3Controller
 
         return ['jpg' => $jpg, 'webp' => $webp];
     }
+
+    // =========================================================================
+    // RANDOM ENDPOINTS
+    // =========================================================================
+
+    /**
+     * GET /v4/random/anime
+     * Returns a random anime from MyAnimeList database.
+     * 
+     * Query Params:
+     * - sfw: bool (optional) - Filter out NSFW content (default: false)
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function randomAnime(Request $request)
+    {
+        try {
+            $sfw = $this->parseSfw($request->get('sfw', false));
+            
+            // Maximum MAL anime ID as of 2024 is around 50000+
+            // We'll search in a reasonable range for active anime
+            $maxAttempts = 10;
+            $attempt = 0;
+            $animeData = null;
+            
+            while ($attempt < $maxAttempts) {
+                // Generate random anime ID between 1 and 50000
+                $randomId = random_int(1, 50000);
+                
+                try {
+                    // Fetch anime data using Jikan
+                    $anime = $this->jikan->getAnime(new \Jikan\Request\Anime\AnimeRequest($randomId));
+                    
+                    if ($anime && !empty($anime->getMalId())) {
+                        $data = json_decode($this->serializer->serialize($anime, 'json'), true);
+                        
+                        // Apply SFW filter if requested
+                        if ($sfw) {
+                            $genreIds = array_column($data['genres'] ?? [], 'mal_id');
+                            if (!empty(array_intersect($genreIds, self::NSFW_GENRE_IDS))) {
+                                $attempt++;
+                                continue;
+                            }
+                        }
+                        
+                        // Transform to V4 format
+                        $animeData = $this->transformRandomAnimeToV4($data);
+                        break;
+                    }
+                } catch (\Exception $e) {
+                    // Anime not found or error, try another ID
+                }
+                
+                $attempt++;
+            }
+            
+            if (empty($animeData)) {
+                return response()->json([
+                    'status' => 404,
+                    'type'   => 'NotFound',
+                    'message' => 'Could not find a valid random anime after ' . $maxAttempts . ' attempts',
+                    'error'  => null,
+                ], 404);
+            }
+            
+            return response()->json([
+                'data' => $animeData,
+            ]);
+            
+        } catch (\Exception $e) {
+            return $this->errorResponse($e);
+        }
+    }
+
+    /**
+     * Transform random anime data to V4 format with full details.
+     */
+    private function transformRandomAnimeToV4(array $data): array
+    {
+        // Remove V3 metadata
+        unset($data['request_hash'], $data['request_cached'], $data['request_cache_expiry']);
+        
+        // Build V4 images object
+        $imageUrl = $data['image_url'] ?? '';
+        $images = $this->buildImagesObject($imageUrl);
+        unset($data['image_url']);
+        $data['images'] = $images;
+        
+        // Build titles array in V4 format
+        $titles = [['type' => 'Default', 'title' => $data['title'] ?? 'Unknown']];
+        
+        if (!empty($data['title_japanese'])) {
+            $titles[] = ['type' => 'Japanese', 'title' => $data['title_japanese']];
+        }
+        if (!empty($data['title_english'])) {
+            $titles[] = ['type' => 'English', 'title' => $data['title_english']];
+        }
+        // Add Romanji (main title is romaji in Jikan v3)
+        if (!empty($data['title'])) {
+            $titles[] = ['type' => 'Romanji', 'title' => $data['title']];
+        }
+        foreach ($data['title_synonyms'] ?? [] as $synonym) {
+            $titles[] = ['type' => 'Synonym', 'title' => $synonym];
+        }
+        $data['titles'] = $titles;
+        
+        // Build trailer object
+        $trailerUrl = $data['trailer_url'] ?? '';
+        $data['trailer'] = [
+            'youtube_id'      => null,
+            'url'             => !empty($trailerUrl) ? $trailerUrl : null,
+            'embed_url'       => !empty($trailerUrl) ? $trailerUrl : null,
+            'images'          => [
+                'image_url'        => null,
+                'small_image_url'  => null,
+                'medium_image_url' => null,
+                'large_image_url'  => null,
+                'maximum_image_url' => null,
+            ],
+        ];
+        
+        // Extract YouTube ID if present
+        if (!empty($trailerUrl) && preg_match('#(?:youtube\.com/embed/|youtu\.be/)([a-zA-Z0-9_-]+)#', $trailerUrl, $m)) {
+            $data['trailer']['youtube_id'] = $m[1];
+        }
+        unset($data['trailer_url']);
+        
+        // Ensure required V4 fields exist
+        $data['approved'] = $data['approved'] ?? true;
+        $data['airing'] = $data['airing'] ?? false;
+        
+        // Transform related → relations (V4 format)
+        if (isset($data['related']) && is_array($data['related'])) {
+            $firstItem = reset($data['related']);
+            if (!isset($firstItem['relation']) && !isset($firstItem['items'])) {
+                $relationsV4 = [];
+                foreach ($data['related'] as $relationType => $items) {
+                    if (is_array($items)) {
+                        $relationsV4[] = [
+                            'relation' => $relationType,
+                            'items'    => $items,
+                        ];
+                    }
+                }
+                $data['relations'] = $relationsV4;
+                unset($data['related']);
+            }
+        }
+        
+        return $data;
+    }
 }

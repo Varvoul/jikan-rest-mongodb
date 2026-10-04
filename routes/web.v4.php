@@ -35,3 +35,13 @@ $router->group(
         ]);
     }
 );
+
+// Random endpoints (V4-specific)
+$router->group(
+    ['prefix' => 'random'],
+    function () use ($router) {
+        $router->get('/anime', [
+            'uses' => 'ListController@randomAnime'
+        ]);
+    }
+);
