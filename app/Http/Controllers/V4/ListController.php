@@ -719,66 +719,65 @@ class ListController extends V3Controller
      * Query Params:
      * - sfw: bool (optional) - Filter out NSFW content (default: false)
      * 
-     * @return \Illuminate\Http\JsonResponse
+     * @return \Illuminate\Http\Response
      */
     public function randomAnime(Request $request)
     {
-        try {
-            $sfw = $this->parseSfw($request->get('sfw', false));
+        $sfw = $this->parseSfw($request->get('sfw', false));
+        
+        // Maximum MAL anime ID as of 2024 is around 50000+
+        // We'll search in a reasonable range for active anime
+        $maxAttempts = 10;
+        $attempt = 0;
+        $animeData = null;
+        
+        while ($attempt < $maxAttempts) {
+            // Generate random anime ID between 1 and 50000
+            $randomId = random_int(1, 50000);
             
-            // Maximum MAL anime ID as of 2024 is around 50000+
-            // We'll search in a reasonable range for active anime
-            $maxAttempts = 10;
-            $attempt = 0;
-            $animeData = null;
-            
-            while ($attempt < $maxAttempts) {
-                // Generate random anime ID between 1 and 50000
-                $randomId = random_int(1, 50000);
+            try {
+                // Fetch anime data using Jikan
+                $anime = $this->jikan->getAnime(new \Jikan\Request\Anime\AnimeRequest($randomId));
                 
-                try {
-                    // Fetch anime data using Jikan
-                    $anime = $this->jikan->getAnime(new \Jikan\Request\Anime\AnimeRequest($randomId));
+                if ($anime && !empty($anime->getMalId())) {
+                    $data = json_decode($this->serializer->serialize($anime, 'json'), true);
                     
-                    if ($anime && !empty($anime->getMalId())) {
-                        $data = json_decode($this->serializer->serialize($anime, 'json'), true);
-                        
-                        // Apply SFW filter if requested
-                        if ($sfw) {
-                            $genreIds = array_column($data['genres'] ?? [], 'mal_id');
-                            if (!empty(array_intersect($genreIds, self::NSFW_GENRE_IDS))) {
-                                $attempt++;
-                                continue;
-                            }
+                    // Apply SFW filter if requested
+                    if ($sfw) {
+                        $genreIds = array_column($data['genres'] ?? [], 'mal_id');
+                        if (!empty(array_intersect($genreIds, self::NSFW_GENRE_IDS))) {
+                            $attempt++;
+                            continue;
                         }
-                        
-                        // Transform to V4 format
-                        $animeData = $this->transformRandomAnimeToV4($data);
-                        break;
                     }
-                } catch (\Exception $e) {
-                    // Anime not found or error, try another ID
+                    
+                    // Transform to V4 format
+                    $animeData = $this->transformRandomAnimeToV4($data);
+                    break;
                 }
-                
-                $attempt++;
+            } catch (\Exception $e) {
+                // Anime not found or error, try another ID
             }
             
-            if (empty($animeData)) {
-                return response()->json([
-                    'status' => 404,
-                    'type'   => 'NotFound',
-                    'message' => 'Could not find a valid random anime after ' . $maxAttempts . ' attempts',
-                    'error'  => null,
-                ], 404);
-            }
-            
-            return response()->json([
-                'data' => $animeData,
-            ]);
-            
-        } catch (\Exception $e) {
-            return $this->errorResponse($e);
+            $attempt++;
         }
+        
+        if (empty($animeData)) {
+            return response()->json([
+                'status' => 404,
+                'type'   => 'NotFound',
+                'message' => 'Could not find a valid random anime after ' . $maxAttempts . ' attempts',
+                'error'  => null,
+            ], 404);
+        }
+        
+        // Return as JSON string (consistent with V3/Jikan response format)
+        $response = [
+            'data' => $animeData,
+        ];
+        
+        return response(json_encode($response, JSON_UNESCAPED_UNICODE))
+            ->header('Content-Type', 'application/json');
     }
 
     /**
