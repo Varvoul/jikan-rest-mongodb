@@ -709,75 +709,227 @@ class ListController extends V3Controller
     }
 
     // =========================================================================
-    // RANDOM ENDPOINTS
+    // RANDOM ENDPOINTS - QUALITY BASED
     // =========================================================================
 
     /**
-     * GET /v4/random/anime
-     * Returns a random anime from MyAnimeList database.
+     * Quality filter configuration for random anime.
+     * Returns anime that users will actually enjoy watching!
+     */
+    private const QUALITY_CONFIG = [
+        'min_score'           => 6.0,
+        'max_score'           => 10.0,
+        'min_popularity'      => 30000,
+        'preferred_types'     => ['tv', 'movie', 'tv_short'],
+        'accepted_types'      => ['tv', 'movie', 'tv_short', 'ova', 'ona', 'special', 'music'],
+        'excluded_genres'     => [12, 49, 15], // Hentai, Erotica, Kids
+        'accepted_status'     => ['Finished Airing', 'Currently Airing'],
+    ];
+
+    /**
+     * GET /v4/random/anime - Returns HIGH-QUALITY random anime!
      * 
-     * Query Params:
-     * - sfw: bool (optional) - Filter out NSFW content (default: false)
+     * Quality Filters (built-in):
+     * - Score: 6.0 - 10.0 (no bad anime)
+     * - Popularity: 30,000+ members (well-known)
+     * - Type: TV & Movies prioritized
+     * - Auto-excludes: Hentai, Kids content
+     * 
+     * Query Params (optional):
+     * - sfw: bool        - SFW mode (default: true)
+     * - min_score: float - Min score (default: 6.0)
+     * - type: string     - Preferred type: tv, movie, ova, etc.
+     * - genre_id: int    - Filter by genre ID
      * 
      * @return \Illuminate\Http\Response
      */
     public function randomAnime(Request $request)
     {
-        $sfw = $this->parseSfw($request->get('sfw', false));
+        $sfw       = $this->parseSfw($request->get('sfw', true));
+        $minScore  = (float) ($request->get('min_score', self::QUALITY_CONFIG['min_score']));
+        $minPop    = $request->get('min_popularity') ? (int) $request->get('min_popularity') : self::QUALITY_CONFIG['min_popularity'];
+        $prefType  = strtolower($request->get('type', ''));
+        $genreFilter = $request->get('genre_id') ? (int) $request->get('genre_id') : null;
         
-        // Maximum MAL anime ID as of 2024 is around 50000+
-        // We'll search in a reasonable range for active anime
-        $maxAttempts = 10;
+        $maxAttempts = 25;
         $attempt = 0;
-        $animeData = null;
+        $candidates = [];
+        $bestCandidate = null;
+        $bestScore = 0;
         
         while ($attempt < $maxAttempts) {
-            // Generate random anime ID between 1 and 50000
-            $randomId = random_int(1, 50000);
+            // Smart ID: 70% popular range (1-20000), 30% newer (20001-45000)
+            $rand = mt_rand(1, 100);
+            $randomId = ($rand <= 70) ? random_int(1, 20000) : random_int(20001, 45000);
             
             try {
-                // Fetch anime data using Jikan
                 $anime = $this->jikan->getAnime(new \Jikan\Request\Anime\AnimeRequest($randomId));
                 
-                if ($anime && !empty($anime->getMalId())) {
-                    $data = json_decode($this->serializer->serialize($anime, 'json'), true);
-                    
-                    // Apply SFW filter if requested
-                    if ($sfw) {
-                        $genreIds = array_column($data['genres'] ?? [], 'mal_id');
-                        if (!empty(array_intersect($genreIds, self::NSFW_GENRE_IDS))) {
-                            $attempt++;
-                            continue;
-                        }
-                    }
-                    
-                    // Transform to V4 format
-                    $animeData = $this->transformRandomAnimeToV4($data);
+                if (!$anime || empty($anime->getMalId())) {
+                    $attempt++;
+                    continue;
+                }
+                
+                $data = json_decode($this->serializer->serialize($anime, 'json'), true);
+                
+                // === QUALITY FILTERS ===
+                
+                // 1. Score check
+                $score = (float) ($data['score'] ?? 0);
+                if ($score < $minScore || $score > self::QUALITY_CONFIG['max_score']) {
+                    $attempt++;
+                    continue;
+                }
+                
+                // 2. Popularity check
+                $members = (int) ($data['members'] ?? 0);
+                if ($members < $minPop) {
+                    $attempt++;
+                    continue;
+                }
+                
+                // 3. Type check
+                $type = strtolower($data['type'] ?? '');
+                if (!in_array($type, self::QUALITY_CONFIG['accepted_types'])) {
+                    $attempt++;
+                    continue;
+                }
+                
+                // 4. Status check
+                $status = $data['status'] ?? '';
+                if (!in_array($status, self::QUALITY_CONFIG['accepted_status'])) {
+                    $attempt++;
+                    continue;
+                }
+                
+                // 5. Genre exclusions (NSFW)
+                $genreIds = array_column($data['genres'] ?? [], 'mal_id');
+                if ($sfw && !empty(array_intersect($genreIds, self::QUALITY_CONFIG['excluded_genres']))) {
+                    $attempt++;
+                    continue;
+                }
+                
+                // 6. Genre filter
+                if ($genreFilter !== null && !in_array($genreFilter, $genreIds)) {
+                    $attempt++;
+                    continue;
+                }
+                
+                // Calculate quality score
+                $qualityScore = $this->calculateQualityScore($data, $prefType);
+                
+                $candidates[] = [
+                    'data'         => $data,
+                    'quality_score' => $qualityScore,
+                    'score'        => $score,
+                    'members'      => $members,
+                    'type'         => $type,
+                ];
+                
+                if ($qualityScore > $bestScore) {
+                    $bestScore = $qualityScore;
+                    $bestCandidate = $data;
+                }
+                
+                // Found a great one!
+                if ($qualityScore >= 85) {
                     break;
                 }
+                
             } catch (\Exception $e) {
-                // Anime not found or error, try another ID
+                // Try another
             }
             
             $attempt++;
         }
         
-        if (empty($animeData)) {
+        if (empty($candidates)) {
             return response()->json([
-                'status' => 404,
-                'type'   => 'NotFound',
-                'message' => 'Could not find a valid random anime after ' . $maxAttempts . ' attempts',
-                'error'  => null,
+                'status'  => 404,
+                'type'    => 'NotFound',
+                'message' => 'No quality anime found after ' . $maxAttempts . ' attempts. Try lowering min_score.',
+                'error'   => null,
             ], 404);
         }
         
-        // Return as JSON string (consistent with V3/Jikan response format)
-        $response = [
-            'data' => $animeData,
+        // Sort by quality and pick from top 5
+        usort($candidates, function($a, $b) {
+            return $b['quality_score'] - $a['quality_score'];
+        });
+        
+        $topCandidates = array_slice($candidates, 0, min(5, count($candidates)));
+        $selected = $topCandidates[array_rand($topCandidates)];
+        $animeData = $selected['data'];
+        
+        // Transform to V4 format
+        $v4Data = $this->transformRandomAnimeToV4($animeData);
+        
+        // Add quality metadata
+        $v4Data['_quality_meta'] = [
+            'score'   => $selected['score'],
+            'members' => $selected['members'],
+            'type'    => $selected['type'],
         ];
         
-        return response(json_encode($response, JSON_UNESCAPED_UNICODE))
+        return response(json_encode(['data' => $v4Data], JSON_UNESCAPED_UNICODE))
             ->header('Content-Type', 'application/json');
+    }
+
+    /**
+     * Calculate quality score for weighted selection (0-100).
+     * Higher = better anime.
+     */
+    private function calculateQualityScore(array $data, string $preferredType): float
+    {
+        $score = 0.0;
+        
+        // Score rating (max 40 points)
+        $rating = (float) ($data['score'] ?? 0);
+        $score += ($rating / 10.0) * 40;
+        
+        // Popularity (max 30 points)
+        $members = (int) ($data['members'] ?? 0);
+        if ($members > 500000) $score += 30;
+        elseif ($members > 200000) $score += 25;
+        elseif ($members > 100000) $score += 20;
+        elseif ($members > 50000) $score += 15;
+        else $score += 10;
+        
+        // Type preference (max 15 points)
+        $type = strtolower($data['type'] ?? '');
+        if (!empty($preferredType) && $type === $preferredType) {
+            $score += 15;
+        } elseif (in_array($type, ['tv', 'movie', 'tv_short'])) {
+            $score += 12;
+        } elseif (in_array($type, ['ova', 'ona'])) {
+            $score += 8;
+        } else {
+            $score += 5;
+        }
+        
+        // Episode count bonus (max 10 points)
+        $episodes = (int) ($data['episodes'] ?? 0);
+        if ($type === 'movie') {
+            $score += 8;
+        } elseif ($episodes >= 12 && $episodes <= 26) {
+            $score += 10;  # Standard cour - ideal
+        } elseif ($episodes >= 6 && $episodes < 12) {
+            $score += 7;
+        } elseif ($episodes > 26 && $episodes <= 52) {
+            $score += 8;
+        } elseif ($episodes > 52) {
+            $score += 6;
+        } else {
+            $score += 3;
+        }
+        
+        // Popular genres bonus (max 5 points)
+        $genreIds = array_column($data['genres'] ?? [], 'mal_id');
+        $popularGenres = [1, 2, 24, 10, 8]; // Action, Adventure, Sci-Fi, Fantasy, Drama
+        $popularCount = count(array_intersect($genreIds, $popularGenres));
+        $score += min($popularCount, 5);
+        
+        return min($score, 100);
     }
 
     /**
