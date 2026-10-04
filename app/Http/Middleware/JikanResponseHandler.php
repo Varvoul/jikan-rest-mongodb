@@ -112,7 +112,15 @@ class JikanResponseHandler
             }
 
             $meta = $this->generateMeta($request);
-            $data = $response->original ?? json_decode($response->content(), true) ?? [];
+            
+            // Extract data from response - handle both array and JSON string
+            $data = $response->original ?? null;
+            if (is_string($data)) {
+                $data = json_decode($data, true) ?? [];
+            } elseif (!is_array($data)) {
+                $content = $response->content();
+                $data = json_decode($content, true) ?? [];
+            }
             
             // Apply response decorations (title_romaji, etc.)
             $data = $this->cacheMutation($data);
