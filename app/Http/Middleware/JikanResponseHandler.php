@@ -42,6 +42,14 @@ class JikanResponseHandler
         'MangaController@full',
     ];
 
+    /**
+     * Routes that completely bypass MongoDB cache and always return live data.
+     * Used for endpoints like random anime where fresh results are required on every request.
+     */
+    private const BYPASS_CACHE = [
+        'ListController@randomAnime',
+    ];
+
     private const HIGH_PRIORITY_QUEUE = [
         'ScheduleController@main'
     ];
@@ -93,6 +101,37 @@ class JikanResponseHandler
                     'message' => 'Resource does not exist',
                     'error' => Cache::get("request:404:{$this->requestUriHash}")
                 ], 404);
+        }
+
+        // Bypass cache entirely for routes that need live data (e.g., random anime)
+        if ($this->route !== null && \in_array($this->route, self::BYPASS_CACHE)) {
+            $response = $next($request);
+
+            if (HttpHelper::hasError($response)) {
+                return $response;
+            }
+
+            $meta = $this->generateMeta($request);
+            $data = $response->original ?? json_decode($response->content(), true) ?? [];
+            
+            // Apply response decorations (title_romaji, etc.)
+            $data = $this->cacheMutation($data);
+            
+            $etag = md5(json_encode($data));
+            $response = array_merge($meta, $data);
+
+            $headers = [
+                'X-Request-Hash' => $this->fingerprint,
+                'X-Request-Cached' => false,
+                'X-Cache-Bypass' => 'live',
+            ];
+
+            return response()
+                ->json($response)
+                ->setEtag($etag)
+                ->withHeaders($headers)
+                ->header('Cache-Control', 'private, no-cache, max-age=0, must-revalidate')
+                ->header('Expires', gmdate('D, d M Y H:i:s', time()) . ' GMT');
         }
 
         // Is the request queueable? (disabled for self-hosted, always use legacy mode)
