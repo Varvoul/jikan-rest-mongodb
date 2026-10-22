@@ -19,6 +19,13 @@ $router->group(
         $router->get('/upcoming', [
             'uses' => 'ListController@seasonsUpcoming'
         ]);
+
+        // Season archive: /v4/seasons/{year}/{season} (e.g. /v4/seasons/2026/fall)
+        // Registered AFTER the literal /now and /upcoming routes so those keep
+        // matching first; the [0-9]{4} constraint keeps them unambiguous anyway.
+        $router->get('/{year:[0-9]{4}}/{season:[A-Za-z]+}', [
+            'uses' => 'ListController@seasonsArchive'
+        ]);
     }
 );
 

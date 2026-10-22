@@ -155,8 +155,7 @@ class JikanResponseHandler
                 return $response;
             }
 
-            Cache::forever($this->fingerprint, $response->original);
-            Cache::forever($this->cacheExpiryFingerprint, time() + $this->requestCacheTtl);
+            $this->storeNormalized($response->original);
         }
 
         // If cache is expired and not queueable, re-fetch
@@ -165,13 +164,12 @@ class JikanResponseHandler
         if ($this->requestCached && $this->requestCacheExpiry <= time() && !$this->queueable) {
             $response = $next($request);
 
-            if (HttpHelper::hasError($response)) {
-                return $response;
+            if (!HttpHelper::hasError($response)) {
+                $this->storeNormalized($response->original);
+                $this->requestCacheExpiry = (int) Cache::get($this->cacheExpiryFingerprint);
             }
-
-            Cache::forever($this->fingerprint, $response->original);
-            Cache::forever($this->cacheExpiryFingerprint, time() + $this->requestCacheTtl);
-            $this->requestCacheExpiry = (int) Cache::get($this->cacheExpiryFingerprint);
+            // else: stale-if-error — fall through and serve the previous good
+            // copy instead of replacing it with (or surfacing) the failure.
         }
 
         // Queue-based updates disabled for self-hosted (no Redis)
@@ -181,7 +179,45 @@ class JikanResponseHandler
         $meta = $this->generateMeta($request);
 
         $cache = Cache::get($this->fingerprint);
-        $cacheMutable = json_decode($cache, true);
+
+        // Type-safe decode. MongoDbStore round-trips BSON verbatim: legacy
+        // entries may come back as arrays, and error payloads WERE cached as
+        // arrays by the pre-fix hasError() (which missed shapes like
+        // {status, type, message, error: null}). Bare json_decode($cache) here
+        // was the source of the recurring 500s ("json_decode(): Argument #1
+        // ($json) must be of type string, array given") on /v4/seasons/*.
+        $cacheMutable = null;
+        if (\is_string($cache)) {
+            $decoded = \json_decode($cache, true);
+            if (\is_array($decoded)) {
+                $cacheMutable = $decoded;
+            }
+        } elseif (\is_array($cache)) {
+            $cacheMutable = $cache;
+        }
+
+        // Poisoned / unusable / error-shaped entry → treat as a cache miss and
+        // refetch live. A successful refetch overwrites the bad entry with a
+        // normalized JSON string (self-healing); a failed one is returned
+        // honestly and never cached.
+        if ($cacheMutable === null || HttpHelper::isErrorPayload($cacheMutable)) {
+            $response = $next($request);
+
+            if (HttpHelper::hasError($response)) {
+                return $response;
+            }
+
+            $this->requestCached = false; // honest meta after the heal
+            $this->storeNormalized($response->original);
+
+            $original = $response->original;
+            $payload = \is_string($original) ? $original : \json_encode($original);
+            $cacheMutable = \is_string($payload) ? \json_decode($payload, true) : $original;
+            if (!\is_array($cacheMutable)) {
+                $cacheMutable = [];
+            }
+        }
+
         $cacheMutable = $this->cacheMutation($cacheMutable);
 
         // ETag must reflect the FINAL decorated body (after cacheMutation /
@@ -220,6 +256,25 @@ class JikanResponseHandler
             ->withHeaders($headers)
             ->header('Cache-Control', 'private, no-cache, max-age=0, must-revalidate')
             ->header('Expires', gmdate('D, d M Y H:i:s', time()) . ' GMT');
+    }
+
+    /**
+     * Cache payloads as canonical JSON strings.
+     *
+     * Controllers historically mixed string bodies (response($json)) with
+     * array bodies (response()->json([...]) — whose ->original is an array).
+     * Storing arrays made MongoDbStore persist BSON documents, which later
+     * crashed json_decode() on read. Normalizing to strings at write time
+     * keeps every cache entry decodeable, forever.
+     */
+    private function storeNormalized($original): void
+    {
+        $payload = \is_string($original) ? $original : \json_encode($original);
+
+        if (\is_string($payload) && $payload !== '' && $payload !== 'null') {
+            Cache::forever($this->fingerprint, $payload);
+            Cache::forever($this->cacheExpiryFingerprint, time() + $this->requestCacheTtl);
+        }
     }
 
     private function generateMeta(Request $request) : array

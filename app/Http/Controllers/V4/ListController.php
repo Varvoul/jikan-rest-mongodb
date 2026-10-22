@@ -153,6 +153,39 @@ class ListController extends V3Controller
     }
 
     /**
+     * GET /v4/seasons/{year}/{season}?page=1&limit=25&sfw=true
+     * e.g. /v4/seasons/2026/fall
+     *
+     * Season archive — reuses the same scrape + V4 transform pipeline as
+     * /seasons/now and /seasons/upcoming.
+     */
+    public function seasonsArchive(Request $request, int $year, string $season)
+    {
+        $season = strtolower($season);
+
+        if (!\in_array($season, ['winter', 'spring', 'summer', 'fall'], true)) {
+            return $this->errorResponse(
+                new \InvalidArgumentException('Invalid season. Must be one of: winter, spring, summer, fall'),
+                400
+            );
+        }
+
+        $maxYear = (int) date('Y') + 1;
+        if ($year < 1960 || $year > $maxYear) {
+            return $this->errorResponse(
+                new \InvalidArgumentException("Invalid year. Must be between 1960 and {$maxYear}"),
+                400
+            );
+        }
+
+        $page = max(1, (int)($request->get('page', 1)));
+        $limit = $this->clampLimit((int)($request->get('limit', self::DEFAULT_LIMIT)));
+        $sfw = $this->parseSfw($request->get('sfw'));
+
+        return $this->fetchSeasonResponse(false, $page, $limit, $sfw, $year, $season);
+    }
+
+    /**
      * GET /v4/top/anime?page=1&limit=25&sfw=true&filter=airing
      */
     public function topAnime(Request $request)
@@ -316,11 +349,17 @@ class ListController extends V3Controller
         return response($this->buildV4Response($results, $page, $limit, $lastPage));
     }
 
-    private function fetchSeasonResponse(bool $upcoming, int $page, int $limit, bool $sfw)
+    private function fetchSeasonResponse(bool $upcoming, int $page, int $limit, bool $sfw, ?int $year = null, ?string $season = null)
     {
         try {
-            $result = $this->jikan->getSeasonal(new SeasonalRequest(null, null, $upcoming));
+            // JikanPHP 2.19.4 signature: SeasonalRequest(?int $year, ?string $season, bool $later)
+            //   now:      (null, null, false)
+            //   upcoming: (null, null, true)
+            //   archive:  (2026, 'fall', false)
+            $result = $this->jikan->getSeasonal(new SeasonalRequest($year, $season, $upcoming));
             $data = json_decode($this->serializer->serialize($result, 'json'), true);
+        } catch (\InvalidArgumentException $e) {
+            return $this->errorResponse($e, 400);
         } catch (\Exception $e) {
             return $this->errorResponse($e);
         }
