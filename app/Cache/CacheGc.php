@@ -264,12 +264,26 @@ class CacheGc
     }
 
     /**
-     * @return array|null
+     * @return array|null decoded report from the state doc's value field
      */
     private function readState()
     {
         $doc = $this->collection->findOne(['key' => $this->stateKey()]);
-        return $doc === null ? null : (array) $doc;
+        if ($doc === null) {
+            return null;
+        }
+
+        $arr = (array) $doc;
+        $value = $arr['value'] ?? null;
+
+        // the report (incl. last_run) is stored JSON-encoded in `value`
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+
+            return is_array($decoded) ? $decoded : null;
+        }
+
+        return null;
     }
 
     /**
