@@ -4,6 +4,7 @@ namespace App\Console;
 
 use App\Console\Commands\ClearQueuedJobs;
 use App\Console\Commands\CacheRemove;
+use App\Console\Commands\CacheGcCommand;
 use App\Console\Commands\ModifyCacheDriver;
 use App\Console\Commands\ModifyCacheMethod;
 use Illuminate\Console\Scheduling\Schedule;
@@ -21,6 +22,7 @@ class Kernel extends ConsoleKernel
         ModifyCacheDriver::class,
         ClearQueuedJobs::class,
         CacheRemove::class,
+        CacheGcCommand::class,
     ];
 
     /**

@@ -303,4 +303,64 @@ class MetaController extends Controller
             \array_slice($requests, $offset, 1000)
         );
     }
+
+    /**
+     * GET/POST /meta/cache_gc
+     *
+     * Dynamic storage guard for the 512MB free-tier cluster: retention sweep
+     * (LRU) + size-watermark eviction. Runs are throttled through the GC
+     * state doc; ?force=1 (with the APP_KEY auth header) bypasses the
+     * throttle. The report of the last run is always included.
+     */
+    public function cacheGc()
+    {
+        try {
+            $prefix = env('CACHE_PREFIX', 'jikan');
+            $uri = env('MONGODB_URI');
+            $database = env('MONGODB_DATABASE', 'jikan');
+            $client = new Client($uri);
+            $collection = $client->selectCollection($database, env('MONGODB_CACHE_COLLECTION', 'cache'));
+
+            $gc = new \App\Cache\CacheGc($collection, $prefix);
+            $force = request()->boolean('force') && $this->isAuthorized();
+            $report = $gc->maybeRun($force);
+
+            // always surface the current size + last stored state
+            $statsOut = $collection->aggregate([['$collStats' => ['storageStats' => []]]])->toArray();
+            $storage = isset($statsOut[0]['storageStats']) ? (array) $statsOut[0]['storageStats'] : [];
+            $stateDoc = $collection->findOne(['key' => $prefix . 'gcstate']);
+            $lastState = null;
+            if ($stateDoc !== null && isset($stateDoc['value']) && is_string($stateDoc['value'])) {
+                $lastState = json_decode($stateDoc['value'], true);
+            }
+
+            return response()->json([
+                'status' => 'ok',
+                'ran' => $report !== null,
+                'report' => $report,
+                'cache_collection_mb' => round((int) ($storage['size'] ?? 0) / 1048576, 1),
+                'cache_docs' => (int) ($storage['count'] ?? 0),
+                'last_state' => $lastState,
+                'timestamp' => date('c'),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * The same auth the response handler uses to bypass caching:
+     * header "auth: APP_KEY".
+     *
+     * @return bool
+     */
+    private function isAuthorized()
+    {
+        $key = env('APP_KEY');
+
+        return $key !== null && $key !== '' && request()->header('auth') === $key;
+    }
 }

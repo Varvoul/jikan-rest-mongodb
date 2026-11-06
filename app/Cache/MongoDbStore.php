@@ -17,6 +17,11 @@ class MongoDbStore implements Store
     protected $collection;
 
     /**
+     * @var CacheGc|null lazily-created dynamic garbage collector
+     */
+    protected $gc;
+
+    /**
      * @var string
      */
     protected $prefix;
@@ -110,7 +115,33 @@ class MongoDbStore implements Store
             ['upsert' => true]
         );
 
+        // Opportunistic dynamic GC: every write means new data entering the
+        // collection. Sample a small fraction of writes; the state-doc throttle
+        // inside CacheGc decides whether a collection pass is actually due.
+        // Never let a GC problem affect the cache write itself.
+        try {
+            if (\random_int(1, 20) === 1) {
+                $this->getGc()->maybeRun();
+            }
+        } catch (\Throwable $e) {
+            // ignored — cache correctness comes first
+        }
+
         return true;
+    }
+
+    /**
+     * Lazily create the dynamic garbage collector.
+     *
+     * @return CacheGc
+     */
+    protected function getGc()
+    {
+        if ($this->gc === null) {
+            $this->gc = new CacheGc($this->collection, $this->prefix);
+        }
+
+        return $this->gc;
     }
 
     /**
@@ -125,13 +156,18 @@ class MongoDbStore implements Store
         $prefixedKey = $this->prefix . $key;
         $current = $this->get($key);
 
+        // Bounded lifetime instead of "no expiry": put($, 0) used to write
+        // expires_at: null docs (invisible to the TTL index) that accumulated
+        // forever (e.g. one per visitor-second once THROTTLE is enabled).
+        $seconds = max(60, (int) env('CACHE_MAX_LIFETIME', 604800));
+
         if ($current === null) {
-            $this->put($key, $value, 0);
+            $this->put($key, $value, $seconds);
             return $value;
         }
 
         $newValue = (int) $current + $value;
-        $this->put($key, $newValue, 0);
+        $this->put($key, $newValue, $seconds);
 
         return $newValue;
     }
@@ -151,29 +187,22 @@ class MongoDbStore implements Store
     /**
      * Store an item in the cache indefinitely.
      *
+     * Bounded "forever": the cluster is an Atlas M0 free tier with a hard
+     * 512MB cap, so "forever" entries previously grew unbounded (10-year TTL
+     * docs) until writes started failing. Forever entries now get the max
+     * lifetime instead (CACHE_MAX_LIFETIME, default 7 days) and are refreshed
+     * by the request paths that need them; cold entries age out via the TTL
+     * index + CacheGc retention sweep.
+     *
      * @param  string  $key
      * @param  mixed   $value
      * @return bool
      */
     public function forever($key, $value)
     {
-        $prefixedKey = $this->prefix . $key;
+        $seconds = max(60, (int) env('CACHE_MAX_LIFETIME', 604800));
 
-        // Store with far future expiry (10 years)
-        $expiresAt = new UTCDateTime((time() + 315360000) * 1000);
-
-        $this->collection->updateOne(
-            ['key' => $prefixedKey],
-            ['$set' => [
-                'key' => $prefixedKey,
-                'value' => $value,
-                'expires_at' => $expiresAt,
-                'updated_at' => new UTCDateTime(time() * 1000),
-            ]],
-            ['upsert' => true]
-        );
-
-        return true;
+        return $this->put($key, $value, $seconds);
     }
 
     /**

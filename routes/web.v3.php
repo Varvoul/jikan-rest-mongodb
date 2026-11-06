@@ -49,6 +49,17 @@ $router->group(
            'uses' => 'MetaController@clearSeasonalCache'
         ]);
 
+        // Dynamic storage guard: retention sweep + size-watermark eviction
+        // for the 512MB free-tier MongoDB cluster. Throttled automatically;
+        // ?force=1 + auth header (APP_KEY) bypasses the throttle.
+        $router->get('/cache_gc', [
+           'uses' => 'MetaController@cacheGc'
+        ]);
+
+        $router->post('/cache_gc', [
+           'uses' => 'MetaController@cacheGc'
+        ]);
+
         $router->get('/seasonal_cache_status', [
            'uses' => 'MetaController@seasonalCacheStatus'
         ]);
