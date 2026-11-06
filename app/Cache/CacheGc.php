@@ -243,7 +243,7 @@ class CacheGc
      */
     private function measure()
     {
-        $out = $this->collection->aggregate([['$collStats' => ['storageStats' => []]]])->toArray();
+        $out = $this->collection->aggregate([['$collStats' => ['storageStats' => (object) []]]])->toArray();
         $storage = isset($out[0]['storageStats']) ? (array) $out[0]['storageStats'] : [];
         return [
             'logical_bytes' => (int) ($storage['size'] ?? 0),

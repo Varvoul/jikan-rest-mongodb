@@ -326,7 +326,7 @@ class MetaController extends Controller
             $report = $gc->maybeRun($force);
 
             // always surface the current size + last stored state
-            $statsOut = $collection->aggregate([['$collStats' => ['storageStats' => []]]])->toArray();
+            $statsOut = $collection->aggregate([['$collStats' => ['storageStats' => (object) []]]])->toArray();
             $storage = isset($statsOut[0]['storageStats']) ? (array) $statsOut[0]['storageStats'] : [];
             $stateDoc = $collection->findOne(['key' => $prefix . 'gcstate']);
             $lastState = null;
