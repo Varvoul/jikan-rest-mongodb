@@ -322,7 +322,7 @@ class MetaController extends Controller
             $collection = $client->selectCollection($database, env('MONGODB_CACHE_COLLECTION', 'cache'));
 
             $gc = new \App\Cache\CacheGc($collection, $prefix);
-            $force = request()->boolean('force') && $this->isAuthorized();
+            $force = $this->wantsForce() && $this->isAuthorized();
             $report = $gc->maybeRun($force);
 
             // always surface the current size + last stored state
@@ -352,15 +352,31 @@ class MetaController extends Controller
     }
 
     /**
+     * ?force=1|true|yes in the query string. Read from the PHP superglobal
+     * directly: this codebase runs on the slim router without Laravel's
+     * global request() helper.
+     *
+     * @return bool
+     */
+    private function wantsForce()
+    {
+        $v = $_GET['force'] ?? '';
+
+        return $v === '1' || $v === 'true' || $v === 'yes';
+    }
+
+    /**
      * The same auth the response handler uses to bypass caching:
-     * header "auth: APP_KEY".
+     * header "auth: APP_KEY". Super-global again (no request() helper in
+     * this slim framework); PSR-7/nginx maps "auth" to HTTP_AUTH.
      *
      * @return bool
      */
     private function isAuthorized()
     {
         $key = env('APP_KEY');
+        $header = $_SERVER['HTTP_AUTH'] ?? '';
 
-        return $key !== null && $key !== '' && request()->header('auth') === $key;
+        return $key !== null && $key !== '' && $header !== '' && hash_equals((string) $key, $header);
     }
 }
