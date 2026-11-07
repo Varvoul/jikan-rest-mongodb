@@ -432,7 +432,15 @@ class AnimeListController extends Controller
             
         } catch (\GuzzleHttp\Exception\ClientException $e) {
             $statusCode = $e->getResponse() ? $e->getResponse()->getStatusCode() : 500;
-            
+
+            // t154 — MAL answers HTTP 404 for queries it has no results page for
+            // (gibberish/over-encoded q=). That is a "no results" answer, not an
+            // API failure: return the documented empty V4 envelope (same shape as
+            // the 200-empty-parse branch below) instead of a 500.
+            if ($statusCode === 404) {
+                return $this->buildPaginatedResponse([], $page, 1, 0, $limit);
+            }
+
             // 405 or other client errors - use fallback
             if ($statusCode === 405 || $statusCode === 429) {
                 return $this->handleMalBlocked($status, $type, $score, $q, $page, $limit, $orderBy, $sort);

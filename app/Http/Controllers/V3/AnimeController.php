@@ -272,6 +272,58 @@ class AnimeController extends Controller
         return response($this->serializer->serialize($anime, 'json'));
     }
 
+    /**
+     * V4 /anime/{id}/characters — t154.
+     *
+     * Upstream Jikan v4 exposes BOTH /characters and /characters_staff for
+     * anime; this fork only registered the legacy characters_staff route, so
+     * /characters answered 400. Both read the same MAL characters page, but
+     * the V4 /characters shape differs: each entry is
+     *   { character: {mal_id,url,images(jpg+webp),name},
+     *     role,
+     *     voice_actors: [ { person: {mal_id,url,images,name}, language } ] }
+     * with NO top-level pagination (a plain "data" array), matching upstream.
+     */
+    public function characters(int $id)
+    {
+        $anime = $this->jikan->getAnimeCharactersAndStaff(new AnimeCharactersAndStaffRequest($id));
+        $raw   = json_decode($this->serializer->serialize($anime, 'json'), true);
+
+        $data = [];
+        foreach (($raw['characters'] ?? []) as $c) {
+            if (!is_array($c)) {
+                continue;
+            }
+            $voiceActors = [];
+            foreach (($c['voice_actors'] ?? []) as $va) {
+                if (!is_array($va)) {
+                    continue;
+                }
+                $voiceActors[] = [
+                    'person'   => [
+                        'mal_id' => $va['mal_id'] ?? null,
+                        'url'    => $va['url'] ?? null,
+                        'images' => $this->buildV4ImagesObject((string) ($va['image_url'] ?? '')),
+                        'name'   => $va['name'] ?? null,
+                    ],
+                    'language' => $va['language'] ?? 'Japanese',
+                ];
+            }
+            $data[] = [
+                'character'     => [
+                    'mal_id' => $c['mal_id'] ?? null,
+                    'url'    => $c['url'] ?? null,
+                    'images' => $this->buildV4ImagesObject((string) ($c['image_url'] ?? '')),
+                    'name'   => $c['name'] ?? null,
+                ],
+                'role'          => $c['role'] ?? null,
+                'voice_actors'  => $voiceActors,
+            ];
+        }
+
+        return response(json_encode(['data' => array_values($data)]));
+    }
+
     public function episodes(int $id, int $page = 1)
     {
         $perPage = 100;

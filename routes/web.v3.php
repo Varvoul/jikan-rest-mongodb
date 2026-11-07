@@ -109,6 +109,12 @@ $router->group(
             'uses' => 'AnimeController@characters_staff'
         ]);
 
+        // V4 /anime/{id}/characters — t154: upstream-v4 alias of characters_staff
+        // (V4 payload shape: character/role/voice_actors; see AnimeController@characters)
+        $router->get('/characters', [
+            'uses' => 'AnimeController@characters'
+        ]);
+
         $router->get('/episodes[/{page:[0-9]+}]', [
             'uses' => 'AnimeController@episodes'
         ]);
