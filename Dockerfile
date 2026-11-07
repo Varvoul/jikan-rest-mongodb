@@ -82,6 +82,22 @@ RUN rm -f composer.lock && composer install \
 # Copy the rest of the application code (does NOT remove the vendor/ layer above)
 COPY . /app
 
+# t153: bake null-safe jikan-v2 video parsers into the vendor layer. MAL
+# redesigned /anime/{id}/_/video (span.title -> span.title.js-color-pc-constant),
+# which 500'd every /v4/anime/{id}/videos request with "Failed to parse
+# .../video". patches/jikan-v2/ ships fixed parsers (see patch-videos.php for
+# the entrypoint-side mirror applied on runtime fallback installs). php -l
+# gates the build so a broken patch can never ship.
+RUN if [ -f vendor/jikan-me/jikan/src/Parser/Anime/StreamEpisodeListItemParser.php ] && [ -f patches/jikan-v2/StreamEpisodeListItemParser.php ]; then \
+        cp patches/jikan-v2/StreamEpisodeListItemParser.php vendor/jikan-me/jikan/src/Parser/Anime/StreamEpisodeListItemParser.php \
+        && cp patches/jikan-v2/PromoListItemParser.php vendor/jikan-me/jikan/src/Parser/Anime/PromoListItemParser.php \
+        && echo "[docker] t153 jikan-v2 video parser patches applied" \
+        && php -l vendor/jikan-me/jikan/src/Parser/Anime/StreamEpisodeListItemParser.php \
+        && php -l vendor/jikan-me/jikan/src/Parser/Anime/PromoListItemParser.php; \
+    else \
+        echo "[docker] t153 patch skipped (vendor or patch files missing)"; \
+    fi
+
 # Create storage directories (writable at build time for the image layer)
 RUN mkdir -p storage/framework/cache storage/logs storage/app && chmod -R 777 storage
 

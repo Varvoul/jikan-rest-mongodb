@@ -530,8 +530,79 @@ class AnimeController extends Controller
 
     public function videos(int $id)
     {
-        $anime = $this->jikan->getAnimeVideos(new AnimeVideosRequest($id));
-        return response($this->serializer->serialize($anime, 'json'));
+        $videos = $this->jikan->getAnimeVideos(new AnimeVideosRequest($id));
+
+        // Build the V4 response shape explicitly (same pattern as full() and
+        // recommendations()): official v4 /anime/{id}/videos returns
+        // promo[].trailer{youtube_id,url,embed_url,images} and
+        // episodes[].{mal_id,title,episode,url,images.jpg}.
+        // t153: the underlying jikan 2.19.4 parser is patched (patches/jikan-v2)
+        // to survive MAL's redesigned /video page; item getters are null-safe
+        // and may return '' for missing fields.
+        $promo = [];
+        foreach ($videos->getPromos() as $promoItem) {
+            $embedUrl = (string) $promoItem->getVideoUrl();
+
+            $trailer = [
+                'youtube_id' => null,
+                'url'        => null,
+                'embed_url'  => $embedUrl !== '' ? $embedUrl : null,
+                'images'     => [
+                    'image_url'        => null,
+                    'small_image_url'  => null,
+                    'medium_image_url' => null,
+                    'large_image_url'  => null,
+                    'maximum_image_url'=> null,
+                ],
+            ];
+
+            if ($embedUrl !== '' && preg_match('#(?:youtube\.com/embed/|youtube-nocookie\.com/embed/|youtu\.be/)([a-zA-Z0-9_-]+)#', $embedUrl, $yt)) {
+                $youtubeId = $yt[1];
+                $trailer['youtube_id'] = $youtubeId;
+                $trailer['url']        = 'https://www.youtube.com/watch?v=' . $youtubeId;
+                $trailer['images']     = [
+                    'image_url'        => 'https://i.ytimg.com/vi/' . $youtubeId . '/hqdefault.jpg',
+                    'small_image_url'  => 'https://i.ytimg.com/vi/' . $youtubeId . '/default.jpg',
+                    'medium_image_url' => 'https://i.ytimg.com/vi/' . $youtubeId . '/mqdefault.jpg',
+                    'large_image_url'  => 'https://i.ytimg.com/vi/' . $youtubeId . '/hqdefault.jpg',
+                    'maximum_image_url'=> 'https://i.ytimg.com/vi/' . $youtubeId . '/maxresdefault.jpg',
+                ];
+            }
+
+            $promo[] = [
+                'title'     => $promoItem->getTitle(),
+                'trailer'   => $trailer,
+                'image_url' => $promoItem->getImageUrl() !== '' ? $promoItem->getImageUrl() : null,
+            ];
+        }
+
+        $episodes = [];
+        foreach ($videos->getEpisodes() as $episodeItem) {
+            $episodeUrl = (string) $episodeItem->getUrl();
+            $imageUrl   = (string) $episodeItem->getImageUrl();
+
+            $malId = null;
+            if ($episodeUrl !== '' && preg_match('#/episode/(\d+)#', $episodeUrl, $ep)) {
+                $malId = (int) $ep[1];
+            }
+
+            $episodes[] = [
+                'mal_id'  => $malId,
+                'title'   => $episodeItem->getTitle(),
+                'episode' => $episodeItem->getEpisode(),
+                'url'     => $episodeUrl !== '' ? $episodeUrl : null,
+                'images'  => [
+                    'jpg' => [
+                        'image_url' => $imageUrl !== '' ? $imageUrl : null,
+                    ],
+                ],
+            ];
+        }
+
+        return response()->json([
+            'promo'    => $promo,
+            'episodes' => $episodes,
+        ]);
     }
 
     public function pictures(int $id)

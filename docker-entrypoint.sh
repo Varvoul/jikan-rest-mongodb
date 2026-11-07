@@ -137,7 +137,14 @@ POLYFILL
         echo "[entrypoint] Patching Jikan AnimeParser::getExternalLinks()..."
         php /app/patch-external.php 2>&1 | tee /tmp/patch-external.log || true
     fi
-    
+
+    # t153: patch jikan-me/jikan video parsers for MAL's redesigned
+    # /anime/{id}/_/video page (see patches/jikan-v2/ + patch-videos.php).
+    if [ -f /app/patch-videos.php ]; then
+        echo "[entrypoint] Patching Jikan video parsers (t153)..."
+        php /app/patch-videos.php 2>&1 | tee /tmp/patch-videos.log || true
+    fi
+
     echo "[entrypoint] ✅ All patches applied!"
 else
     echo "[entrypoint] ⚠️ WARNING: vendor/autoload.php not found, skipping patches"
