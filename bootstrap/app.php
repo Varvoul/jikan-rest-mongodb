@@ -81,6 +81,11 @@ $app->routeMiddleware([
     'brownout' => \App\Http\Middleware\BrownoutMiddleware::class
 ]);
 
+// Global middleware — JikanAuth runs before all routes
+$app->middleware([
+    \App\Http\Middleware\JikanAuth::class,
+]);
+
 /*
 |--------------------------------------------------------------------------
 | Register Service Providers
@@ -120,6 +125,11 @@ $app->make('cache')->extend('mongodb', function ($app, $config) {
 $guzzleClient = new \GuzzleHttp\Client([
     'timeout' => 30,
     'connect_timeout' => 10,
+]);
+
+// Global middleware — JikanAuth runs before all routes
+$app->middleware([
+    \App\Http\Middleware\JikanAuth::class,
 ]);
 $app->instance('GuzzleClient', $guzzleClient);
 
