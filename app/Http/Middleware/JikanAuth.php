@@ -125,30 +125,46 @@ class JikanAuth
             return $this->unauthorized();
         }
 
-        // Lumen caches pathInfo after first access — we must create a new Request
-        // with the stripped path so the router sees the correct URL.
+        // Lumen caches pathInfo — use reflection to reset it so the router
+        // sees the stripped path instead of the original /p/<secret>/... path.
         $queryString = $request->server->get('QUERY_STRING', '');
         $newUri = $rest . ($queryString ? '?' . $queryString : '');
 
-        $newRequest = Request::create(
-            $request->getSchemeAndHttpHost() . $rest,
-            $request->getMethod(),
-            $request->query->all(),
-            $request->cookies->all(),
-            $request->files->all(),
-            array_merge($request->server->all(), [
-                'REQUEST_URI' => $newUri,
-                'PATH_INFO' => $rest,
-                'SCRIPT_NAME' => '',
-            ]),
-            $request->getContent()
-        );
+        // Update server vars
+        $request->server->set('REQUEST_URI', $newUri);
+        $request->server->set('PATH_INFO', $rest);
+        $request->server->set('SCRIPT_NAME', '');
 
-        // Copy over headers
-        foreach ($request->headers->keys() as $key) {
-            $newRequest->headers->set($key, $request->headers->get($key));
+        // Reset cached pathInfo using reflection (Symfony Request caches it)
+        try {
+            $ref = new \ReflectionProperty($request, 'pathInfo');
+            $ref->setAccessible(true);
+            $ref->setValue($request, null);
+
+            $ref2 = new \ReflectionProperty($request, 'requestUri');
+            $ref2->setAccessible(true);
+            $ref2->setValue($request, null);
+
+            $ref3 = new \ReflectionProperty($request, 'basePath');
+            $ref3->setAccessible(true);
+            $ref3->setValue($request, null);
+        } catch (\ReflectionException $e) {
+            // If reflection fails, fall back to creating a new request
+            $newRequest = Request::create(
+                $request->getSchemeAndHttpHost() . $rest,
+                $request->getMethod(),
+                $request->query->all(),
+                $request->cookies->all(),
+                $request->files->all(),
+                $request->server->all(),
+                $request->getContent()
+            );
+            foreach ($request->headers->keys() as $key) {
+                $newRequest->headers->set($key, $request->headers->get($key));
+            }
+            return $next($newRequest);
         }
 
-        return $next($newRequest);
+        return $next($request);
     }
 }
