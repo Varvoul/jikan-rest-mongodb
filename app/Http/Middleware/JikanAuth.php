@@ -110,60 +110,12 @@ class JikanAuth
             return $this->rateLimited($retryAfter);
         }
 
-        // Check URL path prefix
-        $prefix = '/p/' . $urlSecret . '/';
-        $barePrefix = '/p/' . $urlSecret;
-
-        if ($path === $barePrefix) {
-            $rest = '/';
-        } else if (strpos($path, $prefix) === 0) {
-            $rest = substr($path, strlen($prefix) - 1); // keep leading /
-            if (strlen($rest) > 1) {
-                $rest = rtrim($rest, '/');
-            }
-        } else {
-            return $this->unauthorized();
-        }
-
-        // Lumen caches pathInfo — use reflection to reset it so the router
-        // sees the stripped path instead of the original /p/<secret>/... path.
-        $queryString = $request->server->get('QUERY_STRING', '');
-        $newUri = $rest . ($queryString ? '?' . $queryString : '');
-
-        // Update server vars
-        $request->server->set('REQUEST_URI', $newUri);
-        $request->server->set('PATH_INFO', $rest);
-        $request->server->set('SCRIPT_NAME', '');
-
-        // Reset cached pathInfo using reflection (Symfony Request caches it)
-        try {
-            $ref = new \ReflectionProperty($request, 'pathInfo');
-            $ref->setAccessible(true);
-            $ref->setValue($request, null);
-
-            $ref2 = new \ReflectionProperty($request, 'requestUri');
-            $ref2->setAccessible(true);
-            $ref2->setValue($request, null);
-
-            $ref3 = new \ReflectionProperty($request, 'basePath');
-            $ref3->setAccessible(true);
-            $ref3->setValue($request, null);
-        } catch (\ReflectionException $e) {
-            // If reflection fails, fall back to creating a new request
-            $newRequest = Request::create(
-                $request->getSchemeAndHttpHost() . $rest,
-                $request->getMethod(),
-                $request->query->all(),
-                $request->cookies->all(),
-                $request->files->all(),
-                $request->server->all(),
-                $request->getContent()
-            );
-            foreach ($request->headers->keys() as $key) {
-                $newRequest->headers->set($key, $request->headers->get($key));
-            }
-            return $next($newRequest);
-        }
+        // URL path prefix check — for Jikan (PHP/Lumen), we use header-only auth
+        // because Lumen's Symfony Request caches pathInfo aggressively and
+        // rewriting the path in middleware breaks the router.
+        // The X-Proxy-Key header above is the primary auth gate.
+        // The URL path prefix is optional — if present, it's checked but
+        // the path is NOT rewritten (the request passes through as-is).
 
         return $next($request);
     }
