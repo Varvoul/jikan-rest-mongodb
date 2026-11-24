@@ -115,21 +115,40 @@ class JikanAuth
         $barePrefix = '/p/' . $urlSecret;
 
         if ($path === $barePrefix) {
-            // Strip to root
-            $request->server->set('REQUEST_URI', '/');
-            $request->server->set('PATH_INFO', '/');
+            $rest = '/';
         } else if (strpos($path, $prefix) === 0) {
-            // Strip the /p/<secret>/ prefix
-            $rest = substr($path, strlen($prefix) - 1); // keep the leading /
-            // Preserve query string
-            $queryString = $request->server->get('QUERY_STRING', '');
-            $newUri = $rest . ($queryString ? '?' . $queryString : '');
-            $request->server->set('REQUEST_URI', $newUri);
-            $request->server->set('PATH_INFO', $rest);
+            $rest = substr($path, strlen($prefix) - 1); // keep leading /
+            if (strlen($rest) > 1) {
+                $rest = rtrim($rest, '/');
+            }
         } else {
             return $this->unauthorized();
         }
 
-        return $next($request);
+        // Lumen caches pathInfo after first access — we must create a new Request
+        // with the stripped path so the router sees the correct URL.
+        $queryString = $request->server->get('QUERY_STRING', '');
+        $newUri = $rest . ($queryString ? '?' . $queryString : '');
+
+        $newRequest = Request::create(
+            $request->getSchemeAndHttpHost() . $rest,
+            $request->getMethod(),
+            $request->query->all(),
+            $request->cookies->all(),
+            $request->files->all(),
+            array_merge($request->server->all(), [
+                'REQUEST_URI' => $newUri,
+                'PATH_INFO' => $rest,
+                'SCRIPT_NAME' => '',
+            ]),
+            $request->getContent()
+        );
+
+        // Copy over headers
+        foreach ($request->headers->keys() as $key) {
+            $newRequest->headers->set($key, $request->headers->get($key));
+        }
+
+        return $next($newRequest);
     }
 }
